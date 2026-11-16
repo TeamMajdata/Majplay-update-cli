@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.0
+# MAJDATA_UPDATER_VERSION: 1.1.1
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -24,8 +24,9 @@
 
     GUI:
       * By default the updater looks for a portrait 16:9 display (9:16).
-      * On such a display it draws a full-screen GUI and puts all output in the
-        centre of the circle inscribed in the lower half of the screen.
+      * On such a display it draws a full-screen GUI with a 1080 px diameter
+        circle in the lower half (capped by the display width) and puts all
+        output inside that circle.
       * Otherwise it falls back to the command line.
       * Use -NoGui to force the command line.
 
@@ -144,7 +145,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.0'
+$script:UpdaterVersion = '1.1.1'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -234,7 +235,7 @@ try {
         }
     } catch { }
 
-    $scale = [Math]::Min($Width, $Height / 2.0) / 960.0
+    $scale = [Math]::Min($Width, 1080.0) / 960.0
     if ($scale -lt 0.35) { $scale = 0.35 }
     if ($scale -gt 2.5) { $scale = 2.5 }
 
@@ -299,8 +300,12 @@ try {
         $watermarkBrush.Dispose()
 
         $cx = $w / 2.0
-        $cy = $h * 0.75          # centre of the lower half
-        $r = [Math]::Min($w, $h / 2.0) / 2.0 - [Math]::Max(5.0, $w * 0.006)
+        # Circle diameter is 1080 px (capped by the display width). It is
+        # bottom-aligned in the lower half so the full 1080 circle remains
+        # visible on a 1080x1920 portrait display.
+        $diameter = [Math]::Min($w, 1080.0)
+        $r = $diameter / 2.0
+        $cy = $h - $r
         if ($r -lt 10) { return }
 
         $isFailed = [bool]$State.Failed
