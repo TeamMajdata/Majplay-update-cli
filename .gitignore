@@ -1,0 +1,6 @@
+*.log
+*.bak
+*.old
+.majdataplay-updater.json
+.majdataplay-write-test-*
+.test-*
