@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.2
+# MAJDATA_UPDATER_VERSION: 1.1.3
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -145,7 +145,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.2'
+$script:UpdaterVersion = '1.1.3'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -162,7 +162,7 @@ $script:GuiRunspace = $null
 $script:LogFile = $null
 $script:LastPhase = ''
 $script:LastMessage = ''
-$script:CacheRoot = $null
+$script:WorkRoot = $null
 $script:DownloadPath = $null
 
 $script:UiState = [hashtable]::Synchronized(@{
@@ -1201,7 +1201,11 @@ function Invoke-UpdaterSelfUpdate {
         return $result
     }
 
-    $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ('MajdataPlay-Updater-' + [guid]::NewGuid().ToString('N') + '.ps1')
+    $tempDir = $script:WorkRoot
+    if ([string]::IsNullOrWhiteSpace([string]$tempDir)) {
+        $tempDir = Split-Path -Parent $PSCommandPath
+    }
+    $tempPath = Join-Path $tempDir ('MajdataPlay-Updater-' + [guid]::NewGuid().ToString('N') + '.ps1')
     try {
         [System.IO.File]::WriteAllText($tempPath, $remoteText, $script:Utf8Bom)
         $tokens = $null
@@ -2237,15 +2241,14 @@ function Start-Game {
 }
 
 function Assert-DiskSpace {
-    param([string]$CachePath, [long]$AssetSize)
+    param([string]$WorkPath, [long]$AssetSize)
 
     if ($AssetSize -le 0) { return }
     # The ZIP plus its extracted staging tree need roughly 4x the compressed
-    # size. The install drive also holds the downloaded ZIP now, so reserve 4x
-    # there as well.
-    $needCache = [long]($AssetSize * 4.0)
+    # size. Everything now lives below the install directory.
+    $needWork = [long]($AssetSize * 4.0)
     $needInstall = [long]($AssetSize * 4.0)
-    foreach ($pair in @(@($CachePath, $needCache, '缓存'), @($script:InstallPath, $needInstall, '安装'))) {
+    foreach ($pair in @(@($WorkPath, $needWork, '下载/解压'), @($script:InstallPath, $needInstall, '安装'))) {
         try {
             $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath([string]$pair[0]))
             $drive = New-Object System.IO.DriveInfo($root)
@@ -2310,14 +2313,17 @@ try {
     Write-Log ('MajdataPlay Updater {0} 启动。PowerShell {1} / {2}' -f $script:UpdaterVersion, $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString)
     Write-Log ('安装目录: {0}; 通道: {1}; 覆盖 StreamingAssets: {2}' -f $script:InstallPath, $Channel, [bool]$OverwriteStreamingAssets)
 
-    $cacheBase = $env:LOCALAPPDATA
-    if ([string]::IsNullOrWhiteSpace($cacheBase)) { $cacheBase = [System.IO.Path]::GetTempPath() }
-    $script:CacheRoot = Join-Path $cacheBase 'MajdataPlayUpdater'
-    # Default download location: <InstallPath>\MajdataPlay. Keep the extracted
-    # staging tree in LocalAppData so the game folder is not filled with temp data.
+    # All updater work files live below <InstallPath>\MajdataPlay; no external
+    # cache or temporary directory is used.
     $downloadDir = Join-Path $script:InstallPath 'MajdataPlay'
+    $script:WorkRoot = $downloadDir
+    $stagingRoot = Join-Path $downloadDir 'staging'
     New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
-    Write-Log ('下载目录: {0}' -f $downloadDir)
+    if (Test-Path -LiteralPath $stagingRoot) {
+        # Remove leftover staging trees from an interrupted previous run.
+        Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-Log ('下载/解压目录: {0}' -f $downloadDir)
 
     if (-not $NoGui) {
         $screen = Get-EligibleScreen -Index $MonitorIndex
@@ -2429,13 +2435,13 @@ try {
         $tagKey = ([string]$release.Tag) -replace '[^0-9A-Za-z._-]', '_'
         $script:DownloadPath = Join-Path $downloadDir ('{0}-{1}-{2}' -f $tagKey, $cacheKey, $assetName)
         $spaceSize = if ($release.Size -gt 0) { $release.Size } else { $release.ApproxSize }
-        Assert-DiskSpace -CachePath $script:CacheRoot -AssetSize $spaceSize
+        Assert-DiskSpace -WorkPath $script:WorkRoot -AssetSize $spaceSize
 
         Set-UiStatus -Phase '下载更新' -Message ('正在下载 {0}...' -f $assetName) -Progress 8 -Detail ('远程版本 {0}' -f $release.Version)
         $download = Invoke-UpdateDownload -Release $release -Routes $routes -Destination $script:DownloadPath
         Write-Log ('下载完成: {0} ({1})' -f $download, (Format-Size (Get-Item -LiteralPath $download).Length))
 
-        $staging = Join-Path (Join-Path $script:CacheRoot 'staging') ([guid]::NewGuid().ToString('N'))
+        $staging = Join-Path $stagingRoot ([guid]::NewGuid().ToString('N'))
         Set-UiStatus -Phase '解压更新' -Message '正在解压更新包...' -Progress 72
         Expand-UpdatePackage -ZipPath $download -Destination $staging
 

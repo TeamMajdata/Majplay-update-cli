@@ -6,7 +6,7 @@
 - 默认只覆盖游戏程序文件，**保留 `MajdataPlay_Data\StreamingAssets` 中已存在的文件**；新文件仍会补齐。加 `-OverwriteStreamingAssets` 才会覆盖。
 - 默认在竖屏 16:9 显示器上绘制全屏 GUI（白色背景、天蓝色文字）：在屏幕下半部分绘制**直径 1080 px** 的圆，所有输出都放在圆内；不满足条件时自动回退到命令行。
 - 更新完成后自动启动 `MajdataPlay.exe`。
-- 下载包默认保存到 `<安装目录>\MajdataPlay\`，**解压完成后立即删除 ZIP**，避免占用空间。
+- 下载包默认保存到 `<安装目录>\MajdataPlay\`，**解压完成后立即删除 ZIP**，避免占用空间；不使用 `%LOCALAPPDATA%` 或其它外部缓存目录。
 - **更新器自更新**：从 `TeamMajdata/Majplay-update-cli` 的 `main` 分支检查脚本新版本，校验后替换自身并用原参数重启。
 
 ---
@@ -133,7 +133,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.1.2
+  # MAJDATA_UPDATER_VERSION: 1.1.3
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。
@@ -153,7 +153,7 @@ MajdataPlay_Data\StreamingAssets\
 
 1. 下载完整 ZIP 到 `<安装目录>\MajdataPlay\`（默认下载目录）；
 2. 若资源页面提供 SHA256，则校验下载文件；否则至少验证 ZIP 结构；
-3. 解压到 `%LOCALAPPDATA%\MajdataPlayUpdater\staging\<guid>`；
+3. 解压到 `<安装目录>\MajdataPlay\staging\<guid>`；
 4. **解压完成后立即删除下载的 ZIP**（即使后续安装失败也不保留成功解压的包）；
 5. 从解压目录中找到 `MajdataPlay.exe`（兼容 ZIP 内多一层 `StandaloneWindows64` 目录），按上面的 StreamingAssets 规则复制到安装目录；
 6. 写入更新状态；
