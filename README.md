@@ -4,8 +4,9 @@
 
 - 优先使用系统代理；没有可用系统代理时自动走 `gh-proxy.org` 等 GitHub 镜像；最后才尝试直连。
 - 默认只覆盖游戏程序文件，**保留 `MajdataPlay_Data\StreamingAssets` 中已存在的文件**；新文件仍会补齐。加 `-OverwriteStreamingAssets` 才会覆盖。
-- 默认在竖屏 16:9 显示器上绘制全屏 GUI（白色背景、天蓝色文字），所有输出位于**屏幕下半部分内接圆的中心**，并画出该圆；不满足条件时自动回退到命令行。
+- 默认在竖屏 16:9 显示器上绘制全屏 GUI（白色背景、天蓝色文字）：在屏幕下半部分绘制**直径 1080 px** 的圆，所有输出都放在圆内；不满足条件时自动回退到命令行。
 - 更新完成后自动启动 `MajdataPlay.exe`。
+- 下载包默认保存到 `<安装目录>\MajdataPlay\`，**解压完成后立即删除 ZIP**，避免占用空间。
 - **更新器自更新**：从 `TeamMajdata/Majplay-update-cli` 的 `main` 分支检查脚本新版本，校验后替换自身并用原参数重启。
 
 ---
@@ -71,7 +72,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 - **Stable**：比较版本号；同版本号但 commit 不同也视为新的重新构建。
 - **Nightly**：比较 commit（短哈希）；nightly 每次发布都会替换 release，commit 不同即更新。
 - 本地版本高于稳定版（例如正在用 nightly）时默认不降级；如需切回稳定版，使用 `-Channel Stable -Force`。
-- `-Force` 强制重新安装（已有通过校验的缓存包时直接复用）。
+- `-Force` 强制重新安装（若上次在安装阶段失败、留下了通过校验的下载包，会直接复用）。
 - 安装完成后会写入 `.majdataplay-updater.json`，记录通道、tag、版本、commit、资源 SHA256 和安装时间。
 
 ## 代理与镜像
@@ -132,7 +133,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.1.1
+  # MAJDATA_UPDATER_VERSION: 1.1.2
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。
@@ -150,14 +151,15 @@ MajdataPlay_Data\StreamingAssets\
 
 ## 安装与启动
 
-1. 下载完整 ZIP 到 `%LOCALAPPDATA%\MajdataPlayUpdater\downloads`；
+1. 下载完整 ZIP 到 `<安装目录>\MajdataPlay\`（默认下载目录）；
 2. 若资源页面提供 SHA256，则校验下载文件；否则至少验证 ZIP 结构；
 3. 解压到 `%LOCALAPPDATA%\MajdataPlayUpdater\staging\<guid>`；
-4. 从解压目录中找到 `MajdataPlay.exe`（兼容 ZIP 内多一层 `StandaloneWindows64` 目录），按上面的 StreamingAssets 规则复制到安装目录；
-5. 写入更新状态；
-6. 关闭 GUI，启动 `MajdataPlay.exe`。
+4. **解压完成后立即删除下载的 ZIP**（即使后续安装失败也不保留成功解压的包）；
+5. 从解压目录中找到 `MajdataPlay.exe`（兼容 ZIP 内多一层 `StandaloneWindows64` 目录），按上面的 StreamingAssets 规则复制到安装目录；
+6. 写入更新状态；
+7. 关闭 GUI，启动 `MajdataPlay.exe`。
 
-下载支持断点续传（`.part`）。同一版本再次执行 `-Force` 时会复用已校验的缓存包。
+下载支持断点续传（`.part`）。解压成功后 ZIP 会被删除；只有下载中断、解压失败或 ZIP 删除失败时才可能留下包，下次 `-Force` 会校验后复用。
 
 如果游戏正在运行，默认会报错并停止，避免文件被占用；加 `-StopRunningGame` 会先尝试正常关闭，再强制结束。
 

@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.1
+# MAJDATA_UPDATER_VERSION: 1.1.2
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -145,7 +145,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.1'
+$script:UpdaterVersion = '1.1.2'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -2241,9 +2241,10 @@ function Assert-DiskSpace {
 
     if ($AssetSize -le 0) { return }
     # The ZIP plus its extracted staging tree need roughly 4x the compressed
-    # size; a full copy into the install directory needs roughly 3x.
+    # size. The install drive also holds the downloaded ZIP now, so reserve 4x
+    # there as well.
     $needCache = [long]($AssetSize * 4.0)
-    $needInstall = [long]($AssetSize * 3.0)
+    $needInstall = [long]($AssetSize * 4.0)
     foreach ($pair in @(@($CachePath, $needCache, '缓存'), @($script:InstallPath, $needInstall, '安装'))) {
         try {
             $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath([string]$pair[0]))
@@ -2312,8 +2313,11 @@ try {
     $cacheBase = $env:LOCALAPPDATA
     if ([string]::IsNullOrWhiteSpace($cacheBase)) { $cacheBase = [System.IO.Path]::GetTempPath() }
     $script:CacheRoot = Join-Path $cacheBase 'MajdataPlayUpdater'
-    $downloadDir = Join-Path $script:CacheRoot 'downloads'
+    # Default download location: <InstallPath>\MajdataPlay. Keep the extracted
+    # staging tree in LocalAppData so the game folder is not filled with temp data.
+    $downloadDir = Join-Path $script:InstallPath 'MajdataPlay'
     New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+    Write-Log ('下载目录: {0}' -f $downloadDir)
 
     if (-not $NoGui) {
         $screen = Get-EligibleScreen -Index $MonitorIndex
@@ -2434,6 +2438,18 @@ try {
         $staging = Join-Path (Join-Path $script:CacheRoot 'staging') ([guid]::NewGuid().ToString('N'))
         Set-UiStatus -Phase '解压更新' -Message '正在解压更新包...' -Progress 72
         Expand-UpdatePackage -ZipPath $download -Destination $staging
+
+        # The ZIP is no longer needed once extraction has completed; remove it
+        # immediately so the MajdataPlay download folder stays clean.
+        try {
+            if (Test-Path -LiteralPath $download -PathType Leaf) {
+                Remove-Item -LiteralPath $download -Force
+                Write-Log ('已删除下载包: {0}' -f $download)
+            }
+        } catch {
+            Write-Log ('删除下载包失败（安装继续）: ' + $_.Exception.Message) WARN
+        }
+
         $packageRoot = Find-PackageRoot -StagePath $staging
         Write-Log ('更新包根目录: {0}' -f $packageRoot)
 

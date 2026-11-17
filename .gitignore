@@ -1,6 +1,9 @@
 *.log
 *.bak
 *.old
+*.zip
+*.part
+MajdataPlay/
 .majdataplay-updater.json
 .majdataplay-write-test-*
 .test-*
