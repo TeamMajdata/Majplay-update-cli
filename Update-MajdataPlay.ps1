@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.4
+# MAJDATA_UPDATER_VERSION: 1.1.5
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -147,7 +147,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.4'
+$script:UpdaterVersion = '1.1.5'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -596,7 +596,7 @@ try {
     $form.Controls.Add($title)
 
     $subtitle = New-Object System.Windows.Forms.Label
-    $subtitle.Text = '请选择 MajdataPlay 的更新通道。选择会保存到设置文件，之后无需重复选择。'
+    $subtitle.Text = '请选择 MajdataPlay 的更新通道。选择会保存到 .majdataplay-updater.json，之后无需重复选择。'
     $subtitle.Font = New-Object System.Drawing.Font($family, 10, [System.Drawing.FontStyle]::Regular)
     $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
     $subtitle.AutoSize = $false
@@ -919,10 +919,6 @@ function Test-CoreFilesPresent {
             (Test-Path -LiteralPath (Join-Path $script:InstallPath 'MajdataPlay_Data') -PathType Container))
 }
 
-function Get-SettingsPath {
-    return (Join-Path $script:InstallPath '.majdataplay-updater.settings.json')
-}
-
 function ConvertTo-ChannelName {
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
@@ -933,27 +929,23 @@ function ConvertTo-ChannelName {
     }
 }
 
-function Read-UpdaterSettings {
-    $path = Get-SettingsPath
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
-    try {
-        return ([System.IO.File]::ReadAllText($path) | ConvertFrom-Json)
-    } catch {
-        Write-Log ('读取更新器设置失败: ' + $_.Exception.Message) WARN
-        return $null
-    }
-}
-
-function Save-UpdaterSettings {
+function Save-ChannelToState {
     param([string]$SelectedChannel)
 
     $normalized = ConvertTo-ChannelName $SelectedChannel
     if ($null -eq $normalized) { throw ('无效的更新通道: {0}' -f $SelectedChannel) }
-    $settings = [ordered]@{
-        channel = $normalized.ToLowerInvariant()
-        savedAt = (Get-Date).ToUniversalTime().ToString('o')
+
+    # Merge only the channel field into the existing state file so install
+    # metadata is never lost when the user changes the channel.
+    $state = Read-InstallState
+    $data = [ordered]@{}
+    if ($null -ne $state) {
+        foreach ($property in $state.PSObject.Properties) {
+            $data[$property.Name] = $property.Value
+        }
     }
-    [System.IO.File]::WriteAllText((Get-SettingsPath), ($settings | ConvertTo-Json -Depth 4), $script:Utf8NoBom)
+    $data['channel'] = $normalized.ToLowerInvariant()
+    [System.IO.File]::WriteAllText((Get-StatePath), ($data | ConvertTo-Json -Depth 5), $script:Utf8NoBom)
 }
 
 function Test-CommitEqual {
@@ -2495,26 +2487,16 @@ function Resolve-InitialChannel {
     if ($Explicit) {
         $requested = ConvertTo-ChannelName $RequestedChannel
         if ($null -eq $requested) { throw ('无效的更新通道: {0}' -f $RequestedChannel) }
-        Save-UpdaterSettings -SelectedChannel $requested
-        Write-Log ('更新通道由命令行指定并写入设置: {0}' -f $requested)
+        Save-ChannelToState -SelectedChannel $requested
+        Write-Log ('更新通道由命令行指定并写入状态文件: {0}' -f $requested)
         return $requested
-    }
-
-    $settings = Read-UpdaterSettings
-    if ($null -ne $settings) {
-        $saved = ConvertTo-ChannelName ([string]$settings.channel)
-        if ($null -ne $saved) {
-            Write-Log ('使用已保存的更新通道: {0}' -f $saved)
-            return $saved
-        }
     }
 
     $state = Read-InstallState
     if ($null -ne $state) {
         $saved = ConvertTo-ChannelName ([string]$state.channel)
         if ($null -ne $saved) {
-            Save-UpdaterSettings -SelectedChannel $saved
-            Write-Log ('从安装记录恢复更新通道: {0}' -f $saved)
+            Write-Log ('使用状态文件中的更新通道: {0}' -f $saved)
             return $saved
         }
     }
@@ -2541,7 +2523,7 @@ function Resolve-InitialChannel {
         }
 
         $choice = ConvertTo-ChannelName $choice
-        Save-UpdaterSettings -SelectedChannel $choice
+        Save-ChannelToState -SelectedChannel $choice
         Write-Log ('首次运行选择的更新通道: {0}' -f $choice)
         return $choice
     }

@@ -6,7 +6,7 @@
 - 默认只覆盖游戏程序文件，**保留 `MajdataPlay_Data\StreamingAssets` 中已存在的文件**；新文件仍会补齐。加 `-OverwriteStreamingAssets` 才会覆盖。
 - 默认在竖屏 16:9 显示器上绘制全屏 GUI（白色背景、天蓝色文字）：在屏幕下半部分绘制**直径 1080 px** 的圆，所有输出都放在圆内；不满足条件时自动回退到命令行。
 - 更新完成后自动启动 `MajdataPlay.exe`。
-- **首次运行**（安装目录中没有游戏文件）会弹出小窗口，让用户选择 `Stable` 或 `Nightly`，并把选择写入设置文件；后续直接使用保存的通道。
+- **首次运行**（安装目录中没有游戏文件）会弹出小窗口，让用户选择 `Stable` 或 `Nightly`，并把 `channel` 字段写入 `.majdataplay-updater.json`；后续直接使用保存的通道。
 - 下载包默认保存到 `<安装目录>\MajdataPlay\`，**解压完成后立即删除 ZIP**，避免占用空间；不使用 `%LOCALAPPDATA%` 或其它外部缓存目录。
 - **更新器自更新**：从 `TeamMajdata/Majplay-update-cli` 的 `main` 分支检查脚本新版本，校验后替换自身并用原参数重启。
 
@@ -66,13 +66,21 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 - **稳定版 Stable**：正式发布版本。
 - **Nightly 预览版**：滚动构建，包含最新改动。
 
-选择后写入：
+选择结果只写入同一个状态文件：
 
 ```text
-<安装目录>\.majdataplay-updater.settings.json
+<安装目录>\.majdataplay-updater.json
 ```
 
-后续启动会读取该设置，不会再次弹窗。也可以在命令行显式覆盖并更新设置：
+其中仅新增/更新一个字段：
+
+```json
+{
+  "channel": "nightly"
+}
+```
+
+后续启动会读取该字段，不会再次弹窗；安装完成后该文件还会记录版本、commit、SHA256 等安装信息，但通道始终只由 `channel` 字段表示。也可以在命令行显式覆盖并更新该字段：
 
 ```powershell
 .\Update-MajdataPlay.ps1 -Channel Nightly
@@ -156,7 +164,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.1.4
+  # MAJDATA_UPDATER_VERSION: 1.1.5
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。
