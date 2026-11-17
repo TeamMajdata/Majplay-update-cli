@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.7
+# MAJDATA_UPDATER_VERSION: 1.1.8
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -148,7 +148,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.7'
+$script:UpdaterVersion = '1.1.8'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -2585,6 +2585,86 @@ function Stop-GameIfRequested {
     if (Test-GameRunning) { throw '无法关闭正在运行的 MajdataPlay。' }
 }
 
+function Wait-GameWindow {
+    param([int]$TimeoutSec = 60)
+
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    $sawProcess = $false
+    while ($watch.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        $processes = @(Get-Process -Name 'MajdataPlay' -ErrorAction SilentlyContinue)
+        if ($processes.Count -gt 0) { $sawProcess = $true }
+        foreach ($process in $processes) {
+            try {
+                $process.Refresh()
+                if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+                    return $process
+                }
+            } catch { }
+        }
+        if (-not $sawProcess -and $watch.Elapsed.TotalSeconds -ge 5) {
+            throw 'MajdataPlay 进程未能启动。'
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    $processes = @(Get-Process -Name 'MajdataPlay' -ErrorAction SilentlyContinue)
+    if ($processes.Count -eq 0) {
+        throw 'MajdataPlay 启动后未保持运行。'
+    }
+    throw ('MajdataPlay 进程已启动，但在 {0} 秒内没有检测到游戏窗口。' -f $TimeoutSec)
+}
+
+function Set-GameWindowForeground {
+    param([System.Diagnostics.Process]$Process)
+
+    try {
+        if (-not ('MajdataUpdaterWindowNative' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class MajdataUpdaterWindowNative {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+}
+'@
+        }
+
+        $handle = [IntPtr]$Process.MainWindowHandle
+        if ($handle -eq [IntPtr]::Zero) { return $false }
+
+        [void][MajdataUpdaterWindowNative]::ShowWindow($handle, 9) # SW_RESTORE
+        [void][MajdataUpdaterWindowNative]::BringWindowToTop($handle)
+        [void][MajdataUpdaterWindowNative]::SetForegroundWindow($handle)
+
+        # Windows can refuse foreground activation from a background process.
+        # Toggling topmost and retrying makes the window rise reliably.
+        $flags = 0x0001 -bor 0x0002 -bor 0x0040 # NOSIZE | NOMOVE | SHOWWINDOW
+        [void][MajdataUpdaterWindowNative]::SetWindowPos($handle, [IntPtr](-1), 0, 0, 0, 0, $flags)
+        [void][MajdataUpdaterWindowNative]::SetWindowPos($handle, [IntPtr](-2), 0, 0, 0, 0, $flags)
+        [void][MajdataUpdaterWindowNative]::SetForegroundWindow($handle)
+
+        try {
+            Add-Type -AssemblyName Microsoft.VisualBasic
+            [Microsoft.VisualBasic.Interaction]::AppActivate($Process.Id) | Out-Null
+        } catch { }
+
+        Start-Sleep -Milliseconds 300
+        $foreground = [MajdataUpdaterWindowNative]::GetForegroundWindow()
+        return ($foreground -eq $handle)
+    } catch {
+        Write-Log ('设置游戏窗口前台失败: ' + $_.Exception.Message) WARN
+        return $false
+    }
+}
+
 function Start-Game {
     if ($NoLaunch) {
         Write-Log '已指定 -NoLaunch，不启动游戏。'
@@ -2594,12 +2674,23 @@ function Start-Game {
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
         throw "找不到 MajdataPlay.exe: $exe"
     }
+
     if (Test-GameRunning) {
-        Write-Log 'MajdataPlay 已在运行，跳过重复启动。'
-        return
+        Write-Log 'MajdataPlay 已在运行，核验窗口并置于前台。'
+    } else {
+        Write-Log "启动游戏: $exe"
+        $started = Start-Process -FilePath $exe -WorkingDirectory $script:InstallPath -PassThru
+        if ($null -eq $started) { throw '无法创建 MajdataPlay 进程。' }
     }
-    Write-Log "启动游戏: $exe"
-    Start-Process -FilePath $exe -WorkingDirectory $script:InstallPath | Out-Null
+
+    $gameProcess = Wait-GameWindow -TimeoutSec 60
+    Write-Log ('检测到游戏窗口，PID {0}，标题: {1}' -f $gameProcess.Id, $gameProcess.MainWindowTitle)
+    $focused = Set-GameWindowForeground -Process $gameProcess
+    if ($focused) {
+        Write-Log ('MajdataPlay 已启动并置于前台 (PID {0})。' -f $gameProcess.Id)
+    } else {
+        Write-Log ('MajdataPlay 已启动，但未能确认窗口是否处于前台 (PID {0})。' -f $gameProcess.Id) WARN
+    }
 }
 
 function Assert-DiskSpace {
