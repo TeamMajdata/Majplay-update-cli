@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.3
+# MAJDATA_UPDATER_VERSION: 1.1.4
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -31,8 +31,10 @@
       * Use -NoGui to force the command line.
 
 .PARAMETER Channel
-    Stable (default) selects the newest non-prerelease release.
+    Stable selects the newest non-prerelease release.
     Nightly selects the rolling "nightly" release.
+    When omitted, the saved setting is used. On a first run without game files,
+    a small window asks the user to choose and saves the answer.
 
 .PARAMETER InstallPath
     Game directory containing MajdataPlay.exe. Defaults to the script directory
@@ -145,7 +147,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.3'
+$script:UpdaterVersion = '1.1.4'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -545,6 +547,136 @@ try {
 '@
 
 # ---------------------------------------------------------------------------
+# First-run channel picker (small window)
+# ---------------------------------------------------------------------------
+$script:ChannelPromptSource = @'
+param(
+    [hashtable]$Result,
+    [int]$Left,
+    [int]$Top,
+    [int]$Width,
+    [int]$Height
+)
+
+$form = $null
+$ErrorActionPreference = 'Stop'
+try {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    $family = 'Segoe UI'
+    try {
+        $families = @([System.Drawing.FontFamily]::Families | ForEach-Object { $_.Name })
+        foreach ($candidate in @('Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI')) {
+            if ($families -contains $candidate) { $family = $candidate; break }
+        }
+    } catch { }
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'MajdataPlay Updater - 首次运行'
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+    $form.ClientSize = New-Object System.Drawing.Size($Width, $Height)
+    $form.Location = New-Object System.Drawing.Point($Left, $Top)
+    $form.BackColor = [System.Drawing.Color]::White
+    $form.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.TopMost = $true
+    $form.ShowInTaskbar = $true
+    $form.KeyPreview = $true
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = '首次运行'
+    $title.Font = New-Object System.Drawing.Font($family, 22, [System.Drawing.FontStyle]::Bold)
+    $title.ForeColor = [System.Drawing.Color]::FromArgb(2, 132, 199)
+    $title.AutoSize = $true
+    $title.Location = New-Object System.Drawing.Point(30, 24)
+    $form.Controls.Add($title)
+
+    $subtitle = New-Object System.Windows.Forms.Label
+    $subtitle.Text = '请选择 MajdataPlay 的更新通道。选择会保存到设置文件，之后无需重复选择。'
+    $subtitle.Font = New-Object System.Drawing.Font($family, 10, [System.Drawing.FontStyle]::Regular)
+    $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
+    $subtitle.AutoSize = $false
+    $subtitle.Size = New-Object System.Drawing.Size(($Width - 60), 44)
+    $subtitle.Location = New-Object System.Drawing.Point(30, 74)
+    $form.Controls.Add($subtitle)
+
+    $stable = New-Object System.Windows.Forms.Button
+    $stable.Text = "稳定版`nStable"
+    $stable.Font = New-Object System.Drawing.Font($family, 12, [System.Drawing.FontStyle]::Bold)
+    $stable.Size = New-Object System.Drawing.Size(225, 74)
+    $stable.Location = New-Object System.Drawing.Point(30, 130)
+    $stable.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $stable.FlatAppearance.BorderSize = 0
+    $stable.BackColor = [System.Drawing.Color]::FromArgb(2, 132, 199)
+    $stable.ForeColor = [System.Drawing.Color]::White
+    $stable.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $stable.Add_Click({
+        $Result.Channel = 'Stable'
+        $Result.Selected = $true
+        $form.Close()
+    })
+    $form.Controls.Add($stable)
+
+    $nightly = New-Object System.Windows.Forms.Button
+    $nightly.Text = "Nightly`n预览版"
+    $nightly.Font = New-Object System.Drawing.Font($family, 12, [System.Drawing.FontStyle]::Bold)
+    $nightly.Size = New-Object System.Drawing.Size(225, 74)
+    $nightly.Location = New-Object System.Drawing.Point(275, 130)
+    $nightly.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $nightly.FlatAppearance.BorderSize = 0
+    $nightly.BackColor = [System.Drawing.Color]::FromArgb(14, 165, 233)
+    $nightly.ForeColor = [System.Drawing.Color]::White
+    $nightly.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $nightly.Add_Click({
+        $Result.Channel = 'Nightly'
+        $Result.Selected = $true
+        $form.Close()
+    })
+    $form.Controls.Add($nightly)
+
+    $hint = New-Object System.Windows.Forms.Label
+    $hint.Text = '也可以随时使用 -Channel Stable / -Channel Nightly 修改设置。'
+    $hint.Font = New-Object System.Drawing.Font($family, 9, [System.Drawing.FontStyle]::Regular)
+    $hint.ForeColor = [System.Drawing.Color]::FromArgb(56, 189, 248)
+    $hint.AutoSize = $false
+    $hint.Size = New-Object System.Drawing.Size(($Width - 60), 22)
+    $hint.Location = New-Object System.Drawing.Point(30, 224)
+    $form.Controls.Add($hint)
+
+    $form.AcceptButton = $stable
+    $form.Add_KeyDown({
+        param($sender, $eventArgs)
+        if ($eventArgs.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+            $Result.Cancelled = $true
+            $form.Close()
+        }
+    })
+    $form.Add_FormClosing({
+        if (-not $Result.Selected) { $Result.Cancelled = $true }
+        $Result.Closed = $true
+    })
+    $form.Add_Shown({
+        $form.Activate()
+        $Result.Handle = [int64]$form.Handle
+        $Result.Ready = $true
+    })
+
+    [System.Windows.Forms.Application]::Run($form)
+} catch {
+    $Result.Error = $_.Exception.ToString()
+} finally {
+    $Result.Closed = $true
+    if ($null -ne $form) {
+        try { $form.Dispose() } catch { }
+    }
+}
+'@
+
+# ---------------------------------------------------------------------------
 # Logging and small utilities
 # ---------------------------------------------------------------------------
 function Initialize-Logger {
@@ -785,6 +917,43 @@ function Get-LocalVersion {
 function Test-CoreFilesPresent {
     return ((Test-Path -LiteralPath (Join-Path $script:InstallPath 'MajdataPlay.exe') -PathType Leaf) -and
             (Test-Path -LiteralPath (Join-Path $script:InstallPath 'MajdataPlay_Data') -PathType Container))
+}
+
+function Get-SettingsPath {
+    return (Join-Path $script:InstallPath '.majdataplay-updater.settings.json')
+}
+
+function ConvertTo-ChannelName {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    switch ($Value.Trim().ToLowerInvariant()) {
+        'stable' { return 'Stable' }
+        'nightly' { return 'Nightly' }
+        default { return $null }
+    }
+}
+
+function Read-UpdaterSettings {
+    $path = Get-SettingsPath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        return ([System.IO.File]::ReadAllText($path) | ConvertFrom-Json)
+    } catch {
+        Write-Log ('读取更新器设置失败: ' + $_.Exception.Message) WARN
+        return $null
+    }
+}
+
+function Save-UpdaterSettings {
+    param([string]$SelectedChannel)
+
+    $normalized = ConvertTo-ChannelName $SelectedChannel
+    if ($null -eq $normalized) { throw ('无效的更新通道: {0}' -f $SelectedChannel) }
+    $settings = [ordered]@{
+        channel = $normalized.ToLowerInvariant()
+        savedAt = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    [System.IO.File]::WriteAllText((Get-SettingsPath), ($settings | ConvertTo-Json -Depth 4), $script:Utf8NoBom)
 }
 
 function Test-CommitEqual {
@@ -2198,6 +2367,188 @@ function Wait-GuiErrorDismiss {
     $script:UseGui = $false
 }
 
+function Show-ChannelPromptGui {
+    $result = [pscustomobject]@{
+        Success   = $false
+        Channel   = ''
+        Cancelled = $false
+        Error     = ''
+    }
+    $ps = $null
+    $runspace = $null
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+        $width = 540
+        $height = 300
+        $left = $area.Left + [int](($area.Width - $width) / 2)
+        $top = $area.Top + [int](($area.Height - $height) / 2)
+
+        $state = [hashtable]::Synchronized(@{
+            Ready     = $false
+            Selected  = $false
+            Cancelled = $false
+            Closed    = $false
+            Channel   = ''
+            Error     = ''
+            Handle    = [int64]0
+        })
+
+        $runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+        $runspace.ApartmentState = [System.Threading.ApartmentState]::STA
+        $runspace.ThreadOptions = [System.Management.Automation.Runspaces.PSThreadOptions]::ReuseThread
+        $runspace.Open()
+
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        $ps.Runspace = $runspace
+        [void]$ps.AddScript($script:ChannelPromptSource)
+        [void]$ps.AddArgument($state)
+        [void]$ps.AddArgument([int]$left)
+        [void]$ps.AddArgument([int]$top)
+        [void]$ps.AddArgument([int]$width)
+        [void]$ps.AddArgument([int]$height)
+        [void]$ps.BeginInvoke()
+
+        $ready = Wait-WithTimeout -Condition {
+            $state.Ready -or $state.Closed -or -not [string]::IsNullOrWhiteSpace([string]$state.Error)
+        } -TimeoutMs 5000
+        if (-not $ready) { throw '首次运行窗口启动超时。' }
+
+        if (-not $state.Selected -and -not $state.Closed -and [int64]$state.Handle -ne 0) {
+            Start-Sleep -Milliseconds 300
+            try {
+                Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class MajdataUpdaterNative {
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+}
+'@
+                if (-not [MajdataUpdaterNative]::IsWindowVisible([IntPtr]$state.Handle)) {
+                    throw '首次运行窗口不可见。'
+                }
+            } catch {
+                if ($_.Exception.Message -eq '首次运行窗口不可见。') { throw }
+                # If the visibility probe itself is unavailable, keep going.
+            }
+        }
+
+        while (-not $state.Selected -and -not $state.Closed -and [string]::IsNullOrWhiteSpace([string]$state.Error)) {
+            Start-Sleep -Milliseconds 100
+        }
+
+        if ($state.Selected) {
+            $result.Success = $true
+            $result.Channel = [string]$state.Channel
+        } elseif ($state.Cancelled) {
+            $result.Cancelled = $true
+        } else {
+            $result.Error = [string]$state.Error
+            if ([string]::IsNullOrWhiteSpace($result.Error)) { $result.Error = '首次运行窗口意外关闭。' }
+        }
+    } catch {
+        $result.Error = $_.Exception.Message
+    } finally {
+        try {
+            if ($null -ne $ps -and $ps.InvocationStateInfo.State -eq [System.Management.Automation.PSInvocationState]::Running) {
+                $ps.Stop()
+            }
+            if ($null -ne $ps) { $ps.Dispose() }
+            if ($null -ne $runspace) { $runspace.Dispose() }
+        } catch { }
+    }
+    return $result
+}
+
+function Read-ChannelFromConsole {
+    Write-Host ''
+    Write-Host '  首次运行：请选择更新通道' -ForegroundColor Cyan
+    Write-Host '    1. 稳定版 Stable' -ForegroundColor DarkGray
+    Write-Host '    2. Nightly 预览版' -ForegroundColor DarkGray
+    while ($true) {
+        try {
+            $answer = Read-Host '输入 1 或 2（直接回车取消）'
+        } catch {
+            return $null
+        }
+        if ([string]::IsNullOrWhiteSpace($answer)) { return $null }
+        switch ($answer.Trim().ToLowerInvariant()) {
+            '1' { return 'Stable' }
+            's' { return 'Stable' }
+            'stable' { return 'Stable' }
+            '2' { return 'Nightly' }
+            'n' { return 'Nightly' }
+            'nightly' { return 'Nightly' }
+            'q' { return $null }
+            default { Write-Host '请输入 1 或 2。' -ForegroundColor Yellow }
+        }
+    }
+}
+
+function Resolve-InitialChannel {
+    param(
+        [string]$RequestedChannel,
+        [bool]$Explicit
+    )
+
+    if ($Explicit) {
+        $requested = ConvertTo-ChannelName $RequestedChannel
+        if ($null -eq $requested) { throw ('无效的更新通道: {0}' -f $RequestedChannel) }
+        Save-UpdaterSettings -SelectedChannel $requested
+        Write-Log ('更新通道由命令行指定并写入设置: {0}' -f $requested)
+        return $requested
+    }
+
+    $settings = Read-UpdaterSettings
+    if ($null -ne $settings) {
+        $saved = ConvertTo-ChannelName ([string]$settings.channel)
+        if ($null -ne $saved) {
+            Write-Log ('使用已保存的更新通道: {0}' -f $saved)
+            return $saved
+        }
+    }
+
+    $state = Read-InstallState
+    if ($null -ne $state) {
+        $saved = ConvertTo-ChannelName ([string]$state.channel)
+        if ($null -ne $saved) {
+            Save-UpdaterSettings -SelectedChannel $saved
+            Write-Log ('从安装记录恢复更新通道: {0}' -f $saved)
+            return $saved
+        }
+    }
+
+    if (-not (Test-CoreFilesPresent)) {
+        Write-Log '未检测到游戏文件，首次运行需要选择更新通道。'
+        $choice = $null
+        if (-not $NoGui) {
+            $guiResult = Show-ChannelPromptGui
+            if ($guiResult.Success) {
+                $choice = $guiResult.Channel
+            } elseif ($guiResult.Cancelled) {
+                throw (New-Object System.OperationCanceledException('已取消更新通道选择。'))
+            } else {
+                Write-Log ('首次运行窗口不可用: ' + $guiResult.Error) WARN
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($choice)) {
+            $choice = Read-ChannelFromConsole
+        }
+        if ([string]::IsNullOrWhiteSpace($choice)) {
+            throw '未选择更新通道。请使用 -Channel Stable 或 -Channel Nightly 指定。'
+        }
+
+        $choice = ConvertTo-ChannelName $choice
+        Save-UpdaterSettings -SelectedChannel $choice
+        Write-Log ('首次运行选择的更新通道: {0}' -f $choice)
+        return $choice
+    }
+
+    return 'Stable'
+}
+
 function Test-GameRunning {
     $count = @(Get-Process -Name 'MajdataPlay' -ErrorAction SilentlyContinue).Count
     return ($count -gt 0)
@@ -2311,7 +2662,7 @@ try {
     }
     Initialize-Logger -Path $LogPath
     Write-Log ('MajdataPlay Updater {0} 启动。PowerShell {1} / {2}' -f $script:UpdaterVersion, $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString)
-    Write-Log ('安装目录: {0}; 通道: {1}; 覆盖 StreamingAssets: {2}' -f $script:InstallPath, $Channel, [bool]$OverwriteStreamingAssets)
+    Write-Log ('安装目录: {0}; 覆盖 StreamingAssets: {1}' -f $script:InstallPath, [bool]$OverwriteStreamingAssets)
 
     # All updater work files live below <InstallPath>\MajdataPlay; no external
     # cache or temporary directory is used.
@@ -2324,6 +2675,11 @@ try {
         Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
     Write-Log ('下载/解压目录: {0}' -f $downloadDir)
+
+    $channelWasExplicit = $PSBoundParameters.ContainsKey('Channel')
+    $Channel = Resolve-InitialChannel -RequestedChannel $Channel -Explicit $channelWasExplicit
+    $script:UiState.Channel = $Channel
+    Write-Log ('本次更新通道: {0}' -f $Channel)
 
     if (-not $NoGui) {
         $screen = Get-EligibleScreen -Index $MonitorIndex

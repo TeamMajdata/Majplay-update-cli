@@ -5,5 +5,6 @@
 *.part
 MajdataPlay/
 .majdataplay-updater.json
+.majdataplay-updater.settings.json
 .majdataplay-write-test-*
 .test-*
