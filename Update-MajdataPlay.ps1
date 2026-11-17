@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.6
+# MAJDATA_UPDATER_VERSION: 1.1.7
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -148,7 +148,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.6'
+$script:UpdaterVersion = '1.1.7'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -2372,6 +2372,8 @@ function Wait-GuiErrorDismiss {
 }
 
 function Show-ChannelPromptGui {
+    param([object]$TargetScreen)
+
     $result = [pscustomobject]@{
         Success   = $false
         Channel   = ''
@@ -2382,11 +2384,25 @@ function Show-ChannelPromptGui {
     $runspace = $null
     try {
         Add-Type -AssemblyName System.Windows.Forms
-        $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
         $width = 540
         $height = 340
-        $left = $area.Left + [int](($area.Width - $width) / 2)
-        $top = $area.Top + [int](($area.Height - $height) / 2)
+
+        if ($null -ne $TargetScreen) {
+            $area = $TargetScreen.Bounds
+            # Keep the prompt at the same point as the centre of the main GUI
+            # circle: bottom-aligned, 1080 px diameter (capped by screen width).
+            $diameter = [Math]::Min($area.Width, 1080.0)
+            $centerX = $area.Left + ($area.Width / 2.0)
+            $centerY = $area.Top + $area.Height - ($diameter / 2.0)
+            $left = [int][Math]::Round($centerX - ($width / 2.0))
+            $top = [int][Math]::Round($centerY - ($height / 2.0))
+            $left = [Math]::Max($area.Left + 8, [Math]::Min($left, $area.Right - $width - 8))
+            $top = [Math]::Max($area.Top + 8, [Math]::Min($top, $area.Bottom - $height - 8))
+        } else {
+            $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+            $left = $area.Left + [int](($area.Width - $width) / 2)
+            $top = $area.Top + [int](($area.Height - $height) / 2)
+        }
 
         $state = [hashtable]::Synchronized(@{
             Ready     = $false
@@ -2517,7 +2533,8 @@ function Resolve-InitialChannel {
         Write-Log '未检测到游戏文件，首次运行需要选择更新通道。'
         $choice = $null
         if (-not $NoGui) {
-            $guiResult = Show-ChannelPromptGui
+            $promptScreen = Get-EligibleScreen -Index $MonitorIndex
+            $guiResult = Show-ChannelPromptGui -TargetScreen $promptScreen
             if ($guiResult.Success) {
                 $choice = $guiResult.Channel
             } elseif ($guiResult.Cancelled) {

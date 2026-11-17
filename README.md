@@ -77,7 +77,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 
 ## 首次运行与通道设置
 
-当安装目录中还没有 `MajdataPlay.exe` / `MajdataPlay_Data` 时，脚本会弹出一个小窗口：
+当安装目录中还没有 `MajdataPlay.exe` / `MajdataPlay_Data` 时，脚本会弹出一个小窗口。如果检测到竖屏 16:9 显示器，窗口会放在屏幕下半部分、与主 GUI 圆相同圆心（直径 1080 px 的圆）的位置；否则居中显示在主显示器上。
 
 - **稳定版 Stable**：正式发布版，经过测试，更新节奏较慢，更适合日常游玩。
 - **Nightly 预览版**：滚动构建，更新更快，包含最新功能和修复，但可能不稳定，适合尝鲜。
@@ -180,7 +180,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.1.6
+  # MAJDATA_UPDATER_VERSION: 1.1.7
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。
