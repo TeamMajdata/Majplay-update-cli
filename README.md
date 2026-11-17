@@ -7,7 +7,7 @@
 - 默认在竖屏 16:9 显示器上绘制全屏 GUI（白色背景、天蓝色文字）：在屏幕下半部分绘制**直径 1080 px** 的圆，所有输出都放在圆内；不满足条件时自动回退到命令行。
 - 更新完成后自动启动 `MajdataPlay.exe`。
 - **首次运行**（安装目录中没有游戏文件）会弹出小窗口，让用户选择 `Stable` 或 `Nightly`，并把 `channel` 字段写入 `.majdataplay-updater.json`；后续直接使用保存的通道。
-- 下载包默认保存到 `<安装目录>\MajdataPlay\`，**解压完成后立即删除 ZIP**，避免占用空间；不使用 `%LOCALAPPDATA%` 或其它外部缓存目录。
+- 游戏默认安装到 `<脚本目录>\MajdataPlay\`；下载的 ZIP 也放在该目录，**解压完成后立即删除 ZIP**，避免占用空间；不使用 `%LOCALAPPDATA%` 或其它外部缓存目录。
 - **更新器自更新**：从 `TeamMajdata/Majplay-update-cli` 的 `main` 分支检查脚本新版本，校验后替换自身并用原参数重启。
 
 ---
@@ -26,7 +26,23 @@
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 ```
 
-脚本也会自动在自身目录、上一级/上两级目录以及当前目录中寻找 `MajdataPlay.exe`，所以把脚本放在游戏目录的子文件夹里通常也能识别。
+默认目录结构：
+
+```text
+<脚本目录>\
+├─ Update-MajdataPlay.ps1
+└─ MajdataPlay\              # 游戏安装目录
+   ├─ MajdataPlay.exe
+   ├─ MajdataPlay_Data\
+   ├─ staging\               # 仅解压期间存在
+   └─ .majdataplay-updater.json
+```
+
+如果脚本本身已经位于名为 `MajdataPlay` 的文件夹中，则直接使用该文件夹，不会再多套一层。若已有游戏在脚本同级目录、想继续使用它，请显式传：
+
+```powershell
+.\Update-MajdataPlay.ps1 -InstallPath '<旧游戏目录>'
+```
 
 ### 常用示例
 
@@ -63,8 +79,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 
 当安装目录中还没有 `MajdataPlay.exe` / `MajdataPlay_Data` 时，脚本会弹出一个小窗口：
 
-- **稳定版 Stable**：正式发布版本。
-- **Nightly 预览版**：滚动构建，包含最新改动。
+- **稳定版 Stable**：正式发布版，经过测试，更新节奏较慢，更适合日常游玩。
+- **Nightly 预览版**：滚动构建，更新更快，包含最新功能和修复，但可能不稳定，适合尝鲜。
 
 选择结果只写入同一个状态文件：
 
@@ -164,7 +180,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.1.5
+  # MAJDATA_UPDATER_VERSION: 1.1.6
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。
@@ -182,9 +198,9 @@ MajdataPlay_Data\StreamingAssets\
 
 ## 安装与启动
 
-1. 下载完整 ZIP 到 `<安装目录>\MajdataPlay\`（默认下载目录）；
+1. 下载完整 ZIP 到游戏安装目录（默认 `<脚本目录>\MajdataPlay\`）；
 2. 若资源页面提供 SHA256，则校验下载文件；否则至少验证 ZIP 结构；
-3. 解压到 `<安装目录>\MajdataPlay\staging\<guid>`；
+3. 解压到 `<安装目录>\staging\<guid>`；
 4. **解压完成后立即删除下载的 ZIP**（即使后续安装失败也不保留成功解压的包）；
 5. 从解压目录中找到 `MajdataPlay.exe`（兼容 ZIP 内多一层 `StandaloneWindows64` 目录），按上面的 StreamingAssets 规则复制到安装目录；
 6. 写入更新状态；
@@ -209,7 +225,7 @@ MajdataPlay_Data\StreamingAssets\
 | 参数 | 说明 |
 | --- | --- |
 | `-Channel Stable\|Nightly` | 更新通道；省略时使用已保存的设置，首次运行弹窗选择 |
-| `-InstallPath <path>` | 游戏目录；默认自动查找 |
+| `-InstallPath <path>` | 游戏目录；默认 `<脚本目录>\MajdataPlay` |
 | `-Proxy <url>` | 指定代理，如 `http://127.0.0.1:7890` |
 | `-NoProxy` | 禁用所有代理 |
 | `-Mirror <string[]>` | 自定义镜像前缀列表 |

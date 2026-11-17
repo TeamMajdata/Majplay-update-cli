@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.5
+# MAJDATA_UPDATER_VERSION: 1.1.6
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -37,8 +37,9 @@
     a small window asks the user to choose and saves the answer.
 
 .PARAMETER InstallPath
-    Game directory containing MajdataPlay.exe. Defaults to the script directory
-    (or the current directory when it contains the game).
+    Game directory containing MajdataPlay.exe. Defaults to
+    <script directory>\MajdataPlay. If the script itself is inside a folder
+    named MajdataPlay, that folder is used directly.
 
 .PARAMETER Proxy
     Explicit proxy, for example http://127.0.0.1:7890. Overrides proxy detection.
@@ -147,7 +148,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.5'
+$script:UpdaterVersion = '1.1.6'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -596,19 +597,19 @@ try {
     $form.Controls.Add($title)
 
     $subtitle = New-Object System.Windows.Forms.Label
-    $subtitle.Text = '请选择 MajdataPlay 的更新通道。选择会保存到 .majdataplay-updater.json，之后无需重复选择。'
+    $subtitle.Text = 'Stable 更稳定，Nightly 更新更快。请选择：'
     $subtitle.Font = New-Object System.Drawing.Font($family, 10, [System.Drawing.FontStyle]::Regular)
     $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
     $subtitle.AutoSize = $false
-    $subtitle.Size = New-Object System.Drawing.Size(($Width - 60), 44)
-    $subtitle.Location = New-Object System.Drawing.Point(30, 74)
+    $subtitle.Size = New-Object System.Drawing.Size(($Width - 60), 24)
+    $subtitle.Location = New-Object System.Drawing.Point(30, 70)
     $form.Controls.Add($subtitle)
 
     $stable = New-Object System.Windows.Forms.Button
     $stable.Text = "稳定版`nStable"
     $stable.Font = New-Object System.Drawing.Font($family, 12, [System.Drawing.FontStyle]::Bold)
-    $stable.Size = New-Object System.Drawing.Size(225, 74)
-    $stable.Location = New-Object System.Drawing.Point(30, 130)
+    $stable.Size = New-Object System.Drawing.Size(225, 64)
+    $stable.Location = New-Object System.Drawing.Point(30, 110)
     $stable.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $stable.FlatAppearance.BorderSize = 0
     $stable.BackColor = [System.Drawing.Color]::FromArgb(2, 132, 199)
@@ -621,11 +622,20 @@ try {
     })
     $form.Controls.Add($stable)
 
+    $stableDesc = New-Object System.Windows.Forms.Label
+    $stableDesc.Text = "正式发布版，经过测试`n更新节奏较慢`n更适合日常游玩"
+    $stableDesc.Font = New-Object System.Drawing.Font($family, 9.5, [System.Drawing.FontStyle]::Regular)
+    $stableDesc.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
+    $stableDesc.AutoSize = $false
+    $stableDesc.Size = New-Object System.Drawing.Size(225, 76)
+    $stableDesc.Location = New-Object System.Drawing.Point(30, 182)
+    $form.Controls.Add($stableDesc)
+
     $nightly = New-Object System.Windows.Forms.Button
     $nightly.Text = "Nightly`n预览版"
     $nightly.Font = New-Object System.Drawing.Font($family, 12, [System.Drawing.FontStyle]::Bold)
-    $nightly.Size = New-Object System.Drawing.Size(225, 74)
-    $nightly.Location = New-Object System.Drawing.Point(275, 130)
+    $nightly.Size = New-Object System.Drawing.Size(225, 64)
+    $nightly.Location = New-Object System.Drawing.Point(275, 110)
     $nightly.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $nightly.FlatAppearance.BorderSize = 0
     $nightly.BackColor = [System.Drawing.Color]::FromArgb(14, 165, 233)
@@ -638,13 +648,22 @@ try {
     })
     $form.Controls.Add($nightly)
 
+    $nightlyDesc = New-Object System.Windows.Forms.Label
+    $nightlyDesc.Text = "滚动构建，更新更快`n包含最新功能和修复`n可能不稳定，适合尝鲜"
+    $nightlyDesc.Font = New-Object System.Drawing.Font($family, 9.5, [System.Drawing.FontStyle]::Regular)
+    $nightlyDesc.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
+    $nightlyDesc.AutoSize = $false
+    $nightlyDesc.Size = New-Object System.Drawing.Size(225, 76)
+    $nightlyDesc.Location = New-Object System.Drawing.Point(275, 182)
+    $form.Controls.Add($nightlyDesc)
+
     $hint = New-Object System.Windows.Forms.Label
-    $hint.Text = '也可以随时使用 -Channel Stable / -Channel Nightly 修改设置。'
+    $hint.Text = '不确定时，建议选择稳定版。'
     $hint.Font = New-Object System.Drawing.Font($family, 9, [System.Drawing.FontStyle]::Regular)
     $hint.ForeColor = [System.Drawing.Color]::FromArgb(56, 189, 248)
     $hint.AutoSize = $false
     $hint.Size = New-Object System.Drawing.Size(($Width - 60), 22)
-    $hint.Location = New-Object System.Drawing.Point(30, 224)
+    $hint.Location = New-Object System.Drawing.Point(30, 284)
     $form.Controls.Add($hint)
 
     $form.AcceptButton = $stable
@@ -810,35 +829,28 @@ function Resolve-InstallPath {
         return $resolved
     }
 
-    $candidates = New-Object System.Collections.Generic.List[string]
-    if ($PSScriptRoot) {
-        $candidates.Add($PSScriptRoot)
-        $parent = $PSScriptRoot
-        for ($i = 0; $i -lt 2; $i++) {
-            $parent = Split-Path -Parent $parent
-            if ([string]::IsNullOrWhiteSpace($parent)) { break }
-            if (-not $candidates.Contains($parent)) { $candidates.Add($parent) }
-        }
-    }
-    $current = (Get-Location).Path
-    if ($current -and -not $candidates.Contains($current)) { $candidates.Add($current) }
+    $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    $scriptRoot = [System.IO.Path]::GetFullPath($scriptRoot)
 
-    foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath (Join-Path $candidate 'MajdataPlay.exe') -PathType Leaf) {
-            return [System.IO.Path]::GetFullPath($candidate)
-        }
-    }
-    foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath (Join-Path $candidate 'MajdataPlay_Data') -PathType Container) {
-            return [System.IO.Path]::GetFullPath($candidate)
-        }
+    # If the script itself lives in a folder named MajdataPlay, that folder is
+    # already the game root; do not create a nested MajdataPlay\MajdataPlay.
+    if ((Split-Path -Leaf $scriptRoot) -ieq 'MajdataPlay') {
+        return $scriptRoot
     }
 
-    $fallback = if ($PSScriptRoot) { $PSScriptRoot } else { $current }
-    if (-not (Test-Path -LiteralPath $fallback)) {
-        New-Item -ItemType Directory -Path $fallback -Force | Out-Null
+    # Support the common layout: C:\Games\MajdataPlay\Update-MajdataPlay.ps1
+    $parent = Split-Path -Parent $scriptRoot
+    if ($parent -and (Split-Path -Leaf $parent) -ieq 'MajdataPlay') {
+        return [System.IO.Path]::GetFullPath($parent)
     }
-    return [System.IO.Path]::GetFullPath($fallback)
+
+    # Default layout: <script directory>\MajdataPlay is the game root.
+    $defaultPath = Join-Path $scriptRoot 'MajdataPlay'
+    if (-not (Test-Path -LiteralPath $defaultPath)) {
+        New-Item -ItemType Directory -Path $defaultPath -Force | Out-Null
+    }
+
+    return [System.IO.Path]::GetFullPath($defaultPath)
 }
 
 function Get-StatePath {
@@ -2372,7 +2384,7 @@ function Show-ChannelPromptGui {
         Add-Type -AssemblyName System.Windows.Forms
         $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
         $width = 540
-        $height = 300
+        $height = 340
         $left = $area.Left + [int](($area.Width - $width) / 2)
         $top = $area.Top + [int](($area.Height - $height) / 2)
 
@@ -2646,9 +2658,10 @@ try {
     Write-Log ('MajdataPlay Updater {0} 启动。PowerShell {1} / {2}' -f $script:UpdaterVersion, $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString)
     Write-Log ('安装目录: {0}; 覆盖 StreamingAssets: {1}' -f $script:InstallPath, [bool]$OverwriteStreamingAssets)
 
-    # All updater work files live below <InstallPath>\MajdataPlay; no external
-    # cache or temporary directory is used.
-    $downloadDir = Join-Path $script:InstallPath 'MajdataPlay'
+    # All updater work files live inside the game directory (the default game
+    # directory itself is <script directory>\MajdataPlay); no external cache or
+    # temporary directory is used.
+    $downloadDir = $script:InstallPath
     $script:WorkRoot = $downloadDir
     $stagingRoot = Join-Path $downloadDir 'staging'
     New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
