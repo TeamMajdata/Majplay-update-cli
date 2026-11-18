@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.8
+# MAJDATA_UPDATER_VERSION: 1.1.9
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -148,7 +148,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.8'
+$script:UpdaterVersion = '1.1.9'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -238,9 +238,11 @@ try {
         }
     } catch { }
 
-    $scale = [Math]::Min($Width, 1080.0) / 960.0
+    # Scale the whole layout from the display width. On 1080x1920 this keeps
+    # the current look; 1440x2560 and 2160x3840 scale proportionally.
+    $scale = $Width / 960.0
     if ($scale -lt 0.35) { $scale = 0.35 }
-    if ($scale -gt 2.5) { $scale = 2.5 }
+    if ($scale -gt 4.0) { $scale = 4.0 }
 
     function New-UiFont([double]$Pixels, [System.Drawing.FontStyle]$Style) {
         return New-Object System.Drawing.Font($fontFamily, [single]$Pixels, $Style, [System.Drawing.GraphicsUnit]::Pixel)
@@ -303,10 +305,10 @@ try {
         $watermarkBrush.Dispose()
 
         $cx = $w / 2.0
-        # Circle diameter is 1080 px (capped by the display width). It is
-        # bottom-aligned in the lower half so the full 1080 circle remains
-        # visible on a 1080x1920 portrait display.
-        $diameter = [Math]::Min($w, 1080.0)
+        # The circle spans the full display width: 1080 px at 1080x1920,
+        # 2160 px at 4K, and proportionally at other 9:16 resolutions. It is
+        # bottom-aligned so the full circle remains visible.
+        $diameter = $w
         $r = $diameter / 2.0
         $cy = $h - $r
         if ($r -lt 10) { return }
@@ -556,7 +558,8 @@ param(
     [int]$Left,
     [int]$Top,
     [int]$Width,
-    [int]$Height
+    [int]$Height,
+    [double]$Scale = 1.0
 )
 
 $form = $null
@@ -565,6 +568,10 @@ try {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
     [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    $uiScale = [Math]::Max(0.5, [Math]::Min(4.0, [double]$Scale))
+    function S([double]$value) { return [int][Math]::Round($value * $uiScale) }
+    function PX([double]$value) { return [single]($value * $uiScale) }
 
     $family = 'Segoe UI'
     try {
@@ -578,6 +585,7 @@ try {
     $form.Text = 'MajdataPlay Updater - 首次运行'
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+    $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
     $form.ClientSize = New-Object System.Drawing.Size($Width, $Height)
     $form.Location = New-Object System.Drawing.Point($Left, $Top)
     $form.BackColor = [System.Drawing.Color]::White
@@ -590,26 +598,26 @@ try {
 
     $title = New-Object System.Windows.Forms.Label
     $title.Text = '首次运行'
-    $title.Font = New-Object System.Drawing.Font($family, 22, [System.Drawing.FontStyle]::Bold)
+    $title.Font = New-Object System.Drawing.Font($family, (PX 30), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
     $title.ForeColor = [System.Drawing.Color]::FromArgb(2, 132, 199)
     $title.AutoSize = $true
-    $title.Location = New-Object System.Drawing.Point(30, 24)
+    $title.Location = New-Object System.Drawing.Point((S 30), (S 24))
     $form.Controls.Add($title)
 
     $subtitle = New-Object System.Windows.Forms.Label
     $subtitle.Text = 'Stable 更稳定，Nightly 更新更快。请选择：'
-    $subtitle.Font = New-Object System.Drawing.Font($family, 10, [System.Drawing.FontStyle]::Regular)
+    $subtitle.Font = New-Object System.Drawing.Font($family, (PX 13), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
     $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
     $subtitle.AutoSize = $false
-    $subtitle.Size = New-Object System.Drawing.Size(($Width - 60), 24)
-    $subtitle.Location = New-Object System.Drawing.Point(30, 70)
+    $subtitle.Size = New-Object System.Drawing.Size(($Width - (S 60)), (S 24))
+    $subtitle.Location = New-Object System.Drawing.Point((S 30), (S 70))
     $form.Controls.Add($subtitle)
 
     $stable = New-Object System.Windows.Forms.Button
     $stable.Text = "稳定版`nStable"
-    $stable.Font = New-Object System.Drawing.Font($family, 12, [System.Drawing.FontStyle]::Bold)
-    $stable.Size = New-Object System.Drawing.Size(225, 64)
-    $stable.Location = New-Object System.Drawing.Point(30, 110)
+    $stable.Font = New-Object System.Drawing.Font($family, (PX 16), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $stable.Size = New-Object System.Drawing.Size((S 225), (S 64))
+    $stable.Location = New-Object System.Drawing.Point((S 30), (S 110))
     $stable.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $stable.FlatAppearance.BorderSize = 0
     $stable.BackColor = [System.Drawing.Color]::FromArgb(2, 132, 199)
@@ -624,18 +632,18 @@ try {
 
     $stableDesc = New-Object System.Windows.Forms.Label
     $stableDesc.Text = "正式发布版，经过测试`n更新节奏较慢`n更适合日常游玩"
-    $stableDesc.Font = New-Object System.Drawing.Font($family, 9.5, [System.Drawing.FontStyle]::Regular)
+    $stableDesc.Font = New-Object System.Drawing.Font($family, (PX 12.5), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
     $stableDesc.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
     $stableDesc.AutoSize = $false
-    $stableDesc.Size = New-Object System.Drawing.Size(225, 76)
-    $stableDesc.Location = New-Object System.Drawing.Point(30, 182)
+    $stableDesc.Size = New-Object System.Drawing.Size((S 225), (S 76))
+    $stableDesc.Location = New-Object System.Drawing.Point((S 30), (S 182))
     $form.Controls.Add($stableDesc)
 
     $nightly = New-Object System.Windows.Forms.Button
     $nightly.Text = "Nightly`n预览版"
-    $nightly.Font = New-Object System.Drawing.Font($family, 12, [System.Drawing.FontStyle]::Bold)
-    $nightly.Size = New-Object System.Drawing.Size(225, 64)
-    $nightly.Location = New-Object System.Drawing.Point(275, 110)
+    $nightly.Font = New-Object System.Drawing.Font($family, (PX 16), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $nightly.Size = New-Object System.Drawing.Size((S 225), (S 64))
+    $nightly.Location = New-Object System.Drawing.Point((S 275), (S 110))
     $nightly.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $nightly.FlatAppearance.BorderSize = 0
     $nightly.BackColor = [System.Drawing.Color]::FromArgb(14, 165, 233)
@@ -650,20 +658,20 @@ try {
 
     $nightlyDesc = New-Object System.Windows.Forms.Label
     $nightlyDesc.Text = "滚动构建，更新更快`n包含最新功能和修复`n可能不稳定，适合尝鲜"
-    $nightlyDesc.Font = New-Object System.Drawing.Font($family, 9.5, [System.Drawing.FontStyle]::Regular)
+    $nightlyDesc.Font = New-Object System.Drawing.Font($family, (PX 12.5), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
     $nightlyDesc.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
     $nightlyDesc.AutoSize = $false
-    $nightlyDesc.Size = New-Object System.Drawing.Size(225, 76)
-    $nightlyDesc.Location = New-Object System.Drawing.Point(275, 182)
+    $nightlyDesc.Size = New-Object System.Drawing.Size((S 225), (S 76))
+    $nightlyDesc.Location = New-Object System.Drawing.Point((S 275), (S 182))
     $form.Controls.Add($nightlyDesc)
 
     $hint = New-Object System.Windows.Forms.Label
     $hint.Text = '不确定时，建议选择稳定版。'
-    $hint.Font = New-Object System.Drawing.Font($family, 9, [System.Drawing.FontStyle]::Regular)
+    $hint.Font = New-Object System.Drawing.Font($family, (PX 11.5), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
     $hint.ForeColor = [System.Drawing.Color]::FromArgb(56, 189, 248)
     $hint.AutoSize = $false
-    $hint.Size = New-Object System.Drawing.Size(($Width - 60), 22)
-    $hint.Location = New-Object System.Drawing.Point(30, 284)
+    $hint.Size = New-Object System.Drawing.Size(($Width - (S 60)), (S 22))
+    $hint.Location = New-Object System.Drawing.Point((S 30), (S 284))
     $form.Controls.Add($hint)
 
     $form.AcceptButton = $stable
@@ -2384,22 +2392,28 @@ function Show-ChannelPromptGui {
     $runspace = $null
     try {
         Add-Type -AssemblyName System.Windows.Forms
-        $width = 540
-        $height = 340
 
         if ($null -ne $TargetScreen) {
             $area = $TargetScreen.Bounds
-            # Keep the prompt at the same point as the centre of the main GUI
-            # circle: bottom-aligned, 1080 px diameter (capped by screen width).
-            $diameter = [Math]::Min($area.Width, 1080.0)
+            # Match the main GUI circle: full display width, bottom-aligned.
+            $promptScale = $area.Width / 1080.0
+            $diameter = $area.Width
             $centerX = $area.Left + ($area.Width / 2.0)
             $centerY = $area.Top + $area.Height - ($diameter / 2.0)
+        } else {
+            $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+            $promptScale = [Math]::Min($area.Width / 1920.0, $area.Height / 1080.0)
+        }
+        $promptScale = [Math]::Max(0.6, [Math]::Min(4.0, $promptScale))
+        $width = [int][Math]::Round(540 * $promptScale)
+        $height = [int][Math]::Round(340 * $promptScale)
+
+        if ($null -ne $TargetScreen) {
             $left = [int][Math]::Round($centerX - ($width / 2.0))
             $top = [int][Math]::Round($centerY - ($height / 2.0))
             $left = [Math]::Max($area.Left + 8, [Math]::Min($left, $area.Right - $width - 8))
             $top = [Math]::Max($area.Top + 8, [Math]::Min($top, $area.Bottom - $height - 8))
         } else {
-            $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
             $left = $area.Left + [int](($area.Width - $width) / 2)
             $top = $area.Top + [int](($area.Height - $height) / 2)
         }
@@ -2427,6 +2441,7 @@ function Show-ChannelPromptGui {
         [void]$ps.AddArgument([int]$top)
         [void]$ps.AddArgument([int]$width)
         [void]$ps.AddArgument([int]$height)
+        [void]$ps.AddArgument([double]$promptScale)
         [void]$ps.BeginInvoke()
 
         $ready = Wait-WithTimeout -Condition {
