@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.2.1
+# MAJDATA_UPDATER_VERSION: 1.2.2
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -89,8 +89,7 @@
     when the updater restarts after a successful self-update.
 
 .PARAMETER SkipBootMenu
-    Skip the boot menu. This switch is also passed internally when the
-    updater restarts after a successful self-update.
+    Skip the boot menu.
 
 .PARAMETER LogPath
     Log file path. Defaults to <InstallPath>\majdataplay-updater.log.
@@ -153,7 +152,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.2.1'
+$script:UpdaterVersion = '1.2.2'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -553,7 +552,6 @@ try {
 
     $state = @{
         Index       = $index
-        KeyPressed  = $false
         LastSecond  = -1
         Watch       = [System.Diagnostics.Stopwatch]::StartNew()
     }
@@ -648,8 +646,6 @@ try {
 
             if ($TimeoutSec -le 0) {
                 $countdown = '请选择启动项'
-            } elseif ($state.KeyPressed) {
-                $countdown = 'Enter / C 确认'
             } else {
                 $remaining = [Math]::Max(0, $TimeoutSec - $state.Watch.Elapsed.TotalSeconds)
                 $countdown = ('{0:N0} 秒后自动继续' -f [Math]::Ceiling($remaining))
@@ -673,7 +669,6 @@ try {
 
     $form.Add_KeyDown({
         param($sender, $eventArgs)
-        $state.KeyPressed = $true
         $handled = $true
         switch ($eventArgs.KeyCode) {
             ([System.Windows.Forms.Keys]::Up) { $state.Index-- }
@@ -703,6 +698,17 @@ try {
             }
             default { $handled = $false }
         }
+        $isNav = @(
+            [System.Windows.Forms.Keys]::Up, [System.Windows.Forms.Keys]::Down,
+            [System.Windows.Forms.Keys]::W, [System.Windows.Forms.Keys]::Q,
+            [System.Windows.Forms.Keys]::S, [System.Windows.Forms.Keys]::Z,
+            [System.Windows.Forms.Keys]::X
+        ) -contains $eventArgs.KeyCode
+        if ($isNav) {
+            # Restart the inactivity timeout after every navigation key.
+            $state.Watch.Restart()
+            $state.LastSecond = -1
+        }
         if ($state.Index -lt 0) { $state.Index = $Items.Count - 1 }
         if ($state.Index -ge $Items.Count) { $state.Index = 0 }
         if ($handled) { $eventArgs.SuppressKeyPress = $true }
@@ -713,18 +719,20 @@ try {
     $timer.Interval = 100
     $timer.Add_Tick({
         if ($TimeoutSec -le 0) { return }
-        if (-not $state.KeyPressed -and $state.Watch.Elapsed.TotalSeconds -ge $TimeoutSec) {
+        if ($state.Watch.Elapsed.TotalSeconds -ge $TimeoutSec) {
             $timer.Stop()
-            $Result.Action = 'Timeout'
+            $item = $Items[$state.Index]
+            $Result.Kind = $item.Kind
+            $Result.Id = $item.Id
+            $Result.Action = 'Select'
+            $Result.TimedOut = $true
             $form.Close()
             return
         }
-        if (-not $state.KeyPressed) {
-            $second = [int][Math]::Ceiling([Math]::Max(0, $TimeoutSec - $state.Watch.Elapsed.TotalSeconds))
-            if ($second -ne $state.LastSecond) {
-                $state.LastSecond = $second
-                $form.Invalidate()
-            }
+        $second = [int][Math]::Ceiling([Math]::Max(0, $TimeoutSec - $state.Watch.Elapsed.TotalSeconds))
+        if ($second -ne $state.LastSecond) {
+            $state.LastSecond = $second
+            $form.Invalidate()
         }
     })
 
@@ -1410,7 +1418,7 @@ function Start-UpdaterRestart {
 
         if ($null -ne $BoundParameters) {
             foreach ($key in @($BoundParameters.Keys)) {
-                if ($key -eq 'SkipSelfUpdate' -or $key -eq 'SkipBootMenu') { continue }
+                if ($key -eq 'SkipSelfUpdate') { continue }
                 $value = $BoundParameters[$key]
                 if ($null -eq $value) { continue }
                 if ($value -is [System.Management.Automation.SwitchParameter]) {
@@ -1428,7 +1436,6 @@ function Start-UpdaterRestart {
             }
         }
         $arguments.Add('-SkipSelfUpdate')
-        $arguments.Add('-SkipBootMenu')
 
         $argumentLine = $arguments -join ' '
         Write-Log '更新器已更新，正在重启以应用新版本。'
@@ -2488,7 +2495,7 @@ function Read-BootMenuConsole {
         [int]$TimeoutSec
     )
 
-    $result = [pscustomobject]@{ Action = 'Timeout'; Kind = ''; Id = ''; Error = '' }
+    $result = [pscustomobject]@{ Action = 'Timeout'; Kind = ''; Id = ''; TimedOut = $false; Error = '' }
     try {
         if ([Console]::IsInputRedirected) { return $result }
         $null = [Console]::KeyAvailable
@@ -2536,11 +2543,9 @@ function Read-BootMenuConsole {
         Write-Host ''
         if ($TimeoutSec -le 0) {
             Write-Host '  请选择启动项' -ForegroundColor Yellow
-        } elseif ($countdown) {
+        } else {
             $remaining = [Math]::Max(0, $TimeoutSec - $watch.Elapsed.TotalSeconds)
             Write-Host ('  {0:N0} 秒后自动继续' -f [Math]::Ceiling($remaining)) -ForegroundColor Yellow
-        } else {
-            Write-Host '  Enter / C 确认' -ForegroundColor Yellow
         }
         Write-Host '  ↑/↓ 选择   Enter/C 确认   Esc 跳过' -ForegroundColor DarkGray
     }
@@ -2551,6 +2556,11 @@ function Read-BootMenuConsole {
         if ($countdown) {
             $remaining = $TimeoutSec - $watch.Elapsed.TotalSeconds
             if ($remaining -le 0) {
+                $item = $Items[$index]
+                $result.Kind = $item.Kind
+                $result.Id = $item.Id
+                $result.Action = 'Select'
+                $result.TimedOut = $true
                 try { Clear-Host } catch { }
                 return $result
             }
@@ -2564,7 +2574,6 @@ function Read-BootMenuConsole {
         try {
             if ([Console]::KeyAvailable) {
                 $key = [Console]::ReadKey($true)
-                $countdown = $false
                 switch ($key.Key) {
                     ([ConsoleKey]::UpArrow) { $index-- }
                     ([ConsoleKey]::W) { $index-- }
@@ -2594,6 +2603,16 @@ function Read-BootMenuConsole {
                         return $result
                     }
                 }
+                $isNav = @(
+                    [ConsoleKey]::UpArrow, [ConsoleKey]::DownArrow,
+                    [ConsoleKey]::W, [ConsoleKey]::Q, [ConsoleKey]::S,
+                    [ConsoleKey]::Z, [ConsoleKey]::X
+                ) -contains $key.Key
+                if ($isNav) {
+                    # Restart the inactivity timeout after every navigation key.
+                    $watch.Restart()
+                    $lastSecond = -1
+                }
                 if ($index -lt 0) { $index = $Items.Count - 1 }
                 if ($index -ge $Items.Count) { $index = 0 }
                 $redraw = $true
@@ -2619,10 +2638,11 @@ function Show-BootMenu {
     )
 
     $result = [pscustomobject]@{
-        Action  = 'Timeout'
-        Kind    = ''
-        Id      = ''
-        Error   = ''
+        Action   = 'Timeout'
+        Kind     = ''
+        Id       = ''
+        TimedOut = $false
+        Error    = ''
     }
 
     if ($NoGui -or $null -eq $TargetScreen) {
@@ -2634,13 +2654,14 @@ function Show-BootMenu {
     try {
         $bounds = $TargetScreen.Bounds
         $state = [hashtable]::Synchronized(@{
-            Ready   = $false
-            Closed  = $false
-            Action  = 'Timeout'
-            Kind    = ''
-            Id      = ''
-            Error   = ''
-            Handle  = [int64]0
+            Ready    = $false
+            Closed   = $false
+            Action   = 'Timeout'
+            Kind     = ''
+            Id       = ''
+            TimedOut = $false
+            Error    = ''
+            Handle   = [int64]0
         })
 
         $runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
@@ -2680,6 +2701,7 @@ function Show-BootMenu {
         $result.Action = [string]$state.Action
         $result.Kind = [string]$state.Kind
         $result.Id = [string]$state.Id
+        $result.TimedOut = [bool]$state.TimedOut
         return $result
     } catch {
         Write-Log ('启动菜单 GUI 不可用，回退到控制台: ' + $_.Exception.Message) WARN
@@ -2953,6 +2975,50 @@ try {
     }
     Write-Log ('下载/解压目录: {0}' -f $downloadDir)
 
+    Set-UiStatus -Phase '检查代理' -Message '正在检查系统代理...' -Progress 2
+    Write-Log '开始检测系统代理。' DEBUG
+    $proxies = @(Get-SystemProxyCandidates)
+    Write-Log ('代理检测完成，共 {0} 个。' -f $proxies.Count) DEBUG
+    if ($proxies.Count -gt 0) {
+        Write-Log ('检测到代理: ' + (($proxies | ForEach-Object { $_.Display }) -join ', '))
+    } else {
+        Write-Log '未检测到系统代理。'
+    }
+    $routes = @(Get-Routes -Proxies $proxies)
+    Write-Log ('候选线路: ' + (($routes | ForEach-Object { $_.Name }) -join ' -> '))
+    Set-UiDetail ('线路: ' + (($routes | ForEach-Object { $_.Name }) -join ' / '))
+
+    if (-not $SkipSelfUpdate) {
+        Set-UiStatus -Phase '检查更新器' -Message '正在检查更新器自身...' -Progress 3
+        try {
+            # Self-update is a small, best-effort request. Use one route only so
+            # a slow mirror/404 cannot stall the actual game update.
+            $selfRoute = $null
+            $proxyRoute = @($routes | Where-Object { $_.Kind -eq 'proxy' } | Select-Object -First 1)
+            if ($proxyRoute.Count -gt 0) {
+                $selfRoute = $proxyRoute[0]
+            } else {
+                $mirrorRoute = @($routes | Where-Object { $_.Kind -eq 'mirror' } | Select-Object -First 1)
+                if ($mirrorRoute.Count -gt 0) { $selfRoute = $mirrorRoute[0] }
+                else { $selfRoute = @($routes | Where-Object { $_.Kind -eq 'direct' } | Select-Object -First 1)[0] }
+            }
+            $selfResult = Invoke-UpdaterSelfUpdate -Routes @($selfRoute) -BoundParameters $PSBoundParameters -Url $SelfUpdateUrl
+            if ($selfResult.Updated) {
+                Set-FinalState -Success $true -Phase '更新器已更新' -Message $selfResult.Message -Detail ('新版本 {0}' -f $selfResult.Version) -Hint '正在重启...'
+                if ($script:UseGui) { Complete-Gui -DelayMs 1200 }
+                if (Start-UpdaterRestart -BoundParameters $PSBoundParameters) {
+                    exit 0
+                }
+                Write-Log '更新器重启失败，继续使用当前实例完成本次任务。' WARN
+            } elseif ($selfResult.Version) {
+                Write-Log $selfResult.Message DEBUG
+            }
+        } catch {
+            Write-Log ('更新器自更新检查失败（忽略并继续）: ' + $_.Exception.Message) WARN
+        }
+    }
+
+
     $channelWasExplicit = $PSBoundParameters.ContainsKey('Channel')
     $menuState = Read-InstallState
     $menuChannel = 'Stable'
@@ -2984,6 +3050,9 @@ try {
             }
             $menuResult = Show-BootMenu -TargetScreen $menuScreen -Items $menuItems -CurrentEngine $savedEngine -CurrentChannel $menuChannel -TimeoutSec $menuTimeout
             if ($menuResult.Action -eq 'Select') {
+                if ($menuResult.TimedOut) {
+                    Write-Log '启动菜单超时，采用当前高亮项。'
+                }
                 if ($menuResult.Kind -eq 'engine') {
                     $savedEngine = ConvertTo-EngineId $menuResult.Id
                     Save-LaunchEngine -Engine $savedEngine
@@ -2998,7 +3067,7 @@ try {
                     }
                 }
             } else {
-                Write-Log ('启动菜单超时，继续使用引擎 {0} ({1})。' -f $savedEngine, $script:GameLaunchArgs)
+                Write-Log ('启动菜单已跳过，继续使用引擎 {0} ({1})。' -f $savedEngine, $script:GameLaunchArgs)
             }
         } catch {
             Write-Log ('启动菜单失败，继续默认流程: ' + $_.Exception.Message) WARN
@@ -3044,49 +3113,6 @@ try {
         Write-Host '  MajdataPlay Updater' -ForegroundColor Magenta
         Write-Host ('  通道: {0}    安装目录: {1}' -f $Channel, $script:InstallPath) -ForegroundColor DarkGray
         Write-Host ''
-    }
-
-    Set-UiStatus -Phase '检查代理' -Message '正在检查系统代理...' -Progress 2
-    Write-Log '开始检测系统代理。' DEBUG
-    $proxies = @(Get-SystemProxyCandidates)
-    Write-Log ('代理检测完成，共 {0} 个。' -f $proxies.Count) DEBUG
-    if ($proxies.Count -gt 0) {
-        Write-Log ('检测到代理: ' + (($proxies | ForEach-Object { $_.Display }) -join ', '))
-    } else {
-        Write-Log '未检测到系统代理。'
-    }
-    $routes = @(Get-Routes -Proxies $proxies)
-    Write-Log ('候选线路: ' + (($routes | ForEach-Object { $_.Name }) -join ' -> '))
-    Set-UiDetail ('线路: ' + (($routes | ForEach-Object { $_.Name }) -join ' / '))
-
-    if (-not $SkipSelfUpdate) {
-        Set-UiStatus -Phase '检查更新器' -Message '正在检查更新器自身...' -Progress 3
-        try {
-            # Self-update is a small, best-effort request. Use one route only so
-            # a slow mirror/404 cannot stall the actual game update.
-            $selfRoute = $null
-            $proxyRoute = @($routes | Where-Object { $_.Kind -eq 'proxy' } | Select-Object -First 1)
-            if ($proxyRoute.Count -gt 0) {
-                $selfRoute = $proxyRoute[0]
-            } else {
-                $mirrorRoute = @($routes | Where-Object { $_.Kind -eq 'mirror' } | Select-Object -First 1)
-                if ($mirrorRoute.Count -gt 0) { $selfRoute = $mirrorRoute[0] }
-                else { $selfRoute = @($routes | Where-Object { $_.Kind -eq 'direct' } | Select-Object -First 1)[0] }
-            }
-            $selfResult = Invoke-UpdaterSelfUpdate -Routes @($selfRoute) -BoundParameters $PSBoundParameters -Url $SelfUpdateUrl
-            if ($selfResult.Updated) {
-                Set-FinalState -Success $true -Phase '更新器已更新' -Message $selfResult.Message -Detail ('新版本 {0}' -f $selfResult.Version) -Hint '正在重启...'
-                if ($script:UseGui) { Complete-Gui -DelayMs 1200 }
-                if (Start-UpdaterRestart -BoundParameters $PSBoundParameters) {
-                    exit 0
-                }
-                Write-Log '更新器重启失败，继续使用当前实例完成本次任务。' WARN
-            } elseif ($selfResult.Version) {
-                Write-Log $selfResult.Message DEBUG
-            }
-        } catch {
-            Write-Log ('更新器自更新检查失败（忽略并继续）: ' + $_.Exception.Message) WARN
-        }
     }
 
     Set-UiStatus -Phase '检查更新' -Message ('正在获取最新 {0} 版本...' -f $Channel.ToLowerInvariant()) -Progress 4

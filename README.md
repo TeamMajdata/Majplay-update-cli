@@ -77,7 +77,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 
 ## 启动菜单
 
-每次正常启动更新器（未指定 `-CheckOnly` / `-SkipBootMenu`）时，会先显示启动菜单：
+每次启动会先检查更新器自更新；自更新完成并重启后，再显示启动菜单（未指定 `-CheckOnly` / `-SkipBootMenu`）：
 
 - **首次运行**（安装目录中还没有游戏文件）不显示倒计时，必须选择一个启动项。
 - 之后每次启动倒计时 **5 秒**，无键盘操作则使用上次保存的引擎继续，默认 `D3D12`。
@@ -214,7 +214,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.2.1
+  # MAJDATA_UPDATER_VERSION: 1.2.2
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。
@@ -269,7 +269,7 @@ MajdataPlay_Data\StreamingAssets\
 | `-Force` | 强制下载并重新安装 |
 | `-CheckOnly` | 只检查并报告 |
 | `-NoLaunch` | 更新后不启动游戏 |
-| `-SkipBootMenu` | 跳过启动菜单（自更新重启时会自动使用） |
+| `-SkipBootMenu` | 跳过启动菜单 |
 | `-NoGui` | 强制命令行 |
 | `-MonitorIndex <int>` | 指定 GUI 显示器索引，`-1` 为自动 |
 | `-StopRunningGame` | 安装前关闭正在运行的游戏 |
