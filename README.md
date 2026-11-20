@@ -214,7 +214,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.2.2
+  # MAJDATA_UPDATER_VERSION: 1.2.3
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。

@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.2.2
+# MAJDATA_UPDATER_VERSION: 1.2.3
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -152,7 +152,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.2.2'
+$script:UpdaterVersion = '1.2.3'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -553,6 +553,7 @@ try {
     $state = @{
         Index       = $index
         LastSecond  = -1
+        Cancelled   = $false
         Watch       = [System.Diagnostics.Stopwatch]::StartNew()
     }
 
@@ -646,6 +647,8 @@ try {
 
             if ($TimeoutSec -le 0) {
                 $countdown = '请选择启动项'
+            } elseif ($state.Cancelled) {
+                $countdown = 'Enter / C 确认'
             } else {
                 $remaining = [Math]::Max(0, $TimeoutSec - $state.Watch.Elapsed.TotalSeconds)
                 $countdown = ('{0:N0} 秒后自动继续' -f [Math]::Ceiling($remaining))
@@ -669,6 +672,9 @@ try {
 
     $form.Add_KeyDown({
         param($sender, $eventArgs)
+        # Any keyboard action cancels the automatic countdown immediately.
+        $state.Cancelled = $true
+        if ($null -ne $timer) { $timer.Stop() }
         $handled = $true
         switch ($eventArgs.KeyCode) {
             ([System.Windows.Forms.Keys]::Up) { $state.Index-- }
@@ -698,17 +704,6 @@ try {
             }
             default { $handled = $false }
         }
-        $isNav = @(
-            [System.Windows.Forms.Keys]::Up, [System.Windows.Forms.Keys]::Down,
-            [System.Windows.Forms.Keys]::W, [System.Windows.Forms.Keys]::Q,
-            [System.Windows.Forms.Keys]::S, [System.Windows.Forms.Keys]::Z,
-            [System.Windows.Forms.Keys]::X
-        ) -contains $eventArgs.KeyCode
-        if ($isNav) {
-            # Restart the inactivity timeout after every navigation key.
-            $state.Watch.Restart()
-            $state.LastSecond = -1
-        }
         if ($state.Index -lt 0) { $state.Index = $Items.Count - 1 }
         if ($state.Index -ge $Items.Count) { $state.Index = 0 }
         if ($handled) { $eventArgs.SuppressKeyPress = $true }
@@ -718,7 +713,7 @@ try {
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 100
     $timer.Add_Tick({
-        if ($TimeoutSec -le 0) { return }
+        if ($TimeoutSec -le 0 -or $state.Cancelled) { return }
         if ($state.Watch.Elapsed.TotalSeconds -ge $TimeoutSec) {
             $timer.Stop()
             $item = $Items[$state.Index]
@@ -2543,9 +2538,11 @@ function Read-BootMenuConsole {
         Write-Host ''
         if ($TimeoutSec -le 0) {
             Write-Host '  请选择启动项' -ForegroundColor Yellow
-        } else {
+        } elseif ($countdown) {
             $remaining = [Math]::Max(0, $TimeoutSec - $watch.Elapsed.TotalSeconds)
             Write-Host ('  {0:N0} 秒后自动继续' -f [Math]::Ceiling($remaining)) -ForegroundColor Yellow
+        } else {
+            Write-Host '  Enter / C 确认' -ForegroundColor Yellow
         }
         Write-Host '  ↑/↓ 选择   Enter/C 确认   Esc 跳过' -ForegroundColor DarkGray
     }
@@ -2574,6 +2571,8 @@ function Read-BootMenuConsole {
         try {
             if ([Console]::KeyAvailable) {
                 $key = [Console]::ReadKey($true)
+                # Any keyboard action cancels the automatic countdown immediately.
+                $countdown = $false
                 switch ($key.Key) {
                     ([ConsoleKey]::UpArrow) { $index-- }
                     ([ConsoleKey]::W) { $index-- }
@@ -2602,16 +2601,6 @@ function Read-BootMenuConsole {
                         try { Clear-Host } catch { }
                         return $result
                     }
-                }
-                $isNav = @(
-                    [ConsoleKey]::UpArrow, [ConsoleKey]::DownArrow,
-                    [ConsoleKey]::W, [ConsoleKey]::Q, [ConsoleKey]::S,
-                    [ConsoleKey]::Z, [ConsoleKey]::X
-                ) -contains $key.Key
-                if ($isNav) {
-                    # Restart the inactivity timeout after every navigation key.
-                    $watch.Restart()
-                    $lastSecond = -1
                 }
                 if ($index -lt 0) { $index = $Items.Count - 1 }
                 if ($index -ge $Items.Count) { $index = 0 }
