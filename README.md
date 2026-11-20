@@ -20,7 +20,7 @@
 
 ## 快速开始
 
-把 `Update-MajdataPlay.ps1` 放在游戏根目录（与 `MajdataPlay.exe` 同级），然后双击 `Start-MajdataPlay-Updater.cmd`，或在 PowerShell 中运行：
+把 `Update-MajdataPlay.ps1` 放在任意可写目录（默认游戏会安装到同级的 `MajdataPlay` 文件夹），然后双击 `Start-MajdataPlay-Updater.cmd`，或在 PowerShell 中运行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
@@ -75,6 +75,38 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 .\Update-MajdataPlay.ps1 -Mirror 'https://gh-proxy.org','https://ghproxy.net'
 ```
 
+## 启动菜单
+
+每次正常启动更新器（未指定 `-CheckOnly` / `-SkipBootMenu`）时，会先显示 BIOS 风格的启动菜单，倒计时 **5 秒**：
+
+- 无键盘操作 → 使用上次保存的引擎继续更新和启动，默认 `D3D12`。
+- 键盘操作后倒计时停止，等待确认。
+
+可用按键：
+
+| 按键 | 作用 |
+| --- | --- |
+| `↑` / `W` / `Q` | 向上选择 |
+| `↓` / `S` / `Z` / `X` | 向下选择 |
+| `Enter` / `C` | 确认 |
+| `Esc` | 跳过菜单，使用默认项 |
+
+菜单项：
+
+| 启动项 | 启动参数 |
+| --- | --- |
+| D3D12（默认） | `-force-d3d12` |
+| D3D11 | `-force-d3d11` |
+| Vulkan | `-force-vulkan` |
+| OpenGL | `-force-glcore` |
+| 测试模式 | `--test-mode` |
+| 稳定版 Stable | 写入 `channel=stable` |
+| Nightly | 写入 `channel=nightly` |
+
+选择启动项后会把引擎写入 `.majdataplay-updater.json` 的 `engine` 字段，下次菜单会自动选中；默认使用 `d3d12`。选择通道项会更新 `channel` 字段并继续流程。
+
+竖屏 16:9 显示器上，启动菜单绘制在与主 GUI 相同的底部内接圆内；`-NoGui` 或没有合适显示器时使用控制台菜单。
+
 ## 首次运行与通道设置
 
 当安装目录中还没有 `MajdataPlay.exe` / `MajdataPlay_Data` 时，脚本会弹出一个小窗口。如果检测到竖屏 16:9 显示器，窗口会按分辨率缩放，并放在屏幕下半部分、与主 GUI 圆相同的圆心位置；否则居中显示在主显示器上。
@@ -88,15 +120,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 <安装目录>\.majdataplay-updater.json
 ```
 
-其中仅新增/更新一个字段：
+通道由 `channel` 字段记录，启动引擎由 `engine` 字段记录：
 
 ```json
 {
-  "channel": "nightly"
+  "channel": "nightly",
+  "engine": "vulkan"
 }
 ```
 
-后续启动会读取该字段，不会再次弹窗；安装完成后该文件还会记录版本、commit、SHA256 等安装信息，但通道始终只由 `channel` 字段表示。也可以在命令行显式覆盖并更新该字段：
+后续启动会读取这些字段，不会再次询问通道；安装完成后该文件还会记录版本、commit、SHA256 等安装信息，但通道始终只由 `channel` 字段表示。也可以在命令行显式覆盖并更新该字段：
 
 ```powershell
 .\Update-MajdataPlay.ps1 -Channel Nightly
@@ -180,7 +213,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.1.9
+  # MAJDATA_UPDATER_VERSION: 1.2.0
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。
@@ -235,6 +268,7 @@ MajdataPlay_Data\StreamingAssets\
 | `-Force` | 强制下载并重新安装 |
 | `-CheckOnly` | 只检查并报告 |
 | `-NoLaunch` | 更新后不启动游戏 |
+| `-SkipBootMenu` | 跳过 5 秒启动菜单（自更新重启时会自动使用） |
 | `-NoGui` | 强制命令行 |
 | `-MonitorIndex <int>` | 指定 GUI 显示器索引，`-1` 为自动 |
 | `-StopRunningGame` | 安装前关闭正在运行的游戏 |

@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.1.9
+# MAJDATA_UPDATER_VERSION: 1.2.0
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -89,6 +89,10 @@
     Do not check/replace the updater itself. This switch is also passed internally
     when the updater restarts after a successful self-update.
 
+.PARAMETER SkipBootMenu
+    Skip the 5-second boot menu. This switch is also passed internally when the
+    updater restarts after a successful self-update.
+
 .PARAMETER LogPath
     Log file path. Defaults to <InstallPath>\majdataplay-updater.log.
 
@@ -142,13 +146,15 @@ param(
 
     [switch]$SkipSelfUpdate,
 
+    [switch]$SkipBootMenu,
+
     [string]$LogPath
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.1.9'
+$script:UpdaterVersion = '1.2.0'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -159,6 +165,15 @@ $script:WindowsAssetPattern = '^MajdataPlay-StandaloneWindows64.*\.zip$'
 $script:UserAgent = "MajdataPlay-Updater/$($script:UpdaterVersion) (+https://github.com/TeamMajdata/MajdataPlay)"
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:Utf8Bom = New-Object System.Text.UTF8Encoding($true)
+$script:DefaultEngine = 'd3d12'
+$script:GameLaunchArgs = '-force-d3d12'
+$script:EngineOptions = [ordered]@{
+    'd3d12'  = [pscustomobject]@{ Label = 'D3D12'; Description = '强制 Direct3D 12'; Args = '-force-d3d12' }
+    'd3d11'  = [pscustomobject]@{ Label = 'D3D11'; Description = '强制 Direct3D 11'; Args = '-force-d3d11' }
+    'vulkan' = [pscustomobject]@{ Label = 'Vulkan'; Description = '强制 Vulkan'; Args = '-force-vulkan' }
+    'opengl' = [pscustomobject]@{ Label = 'OpenGL'; Description = '强制 OpenGL'; Args = '-force-glcore' }
+    'test'   = [pscustomobject]@{ Label = '测试模式'; Description = '--test-mode'; Args = '--test-mode' }
+}
 $script:UseGui = $false
 $script:GuiPowerShell = $null
 $script:GuiRunspace = $null
@@ -704,6 +719,270 @@ try {
 '@
 
 # ---------------------------------------------------------------------------
+# BIOS-style boot menu (5 second timeout)
+# ---------------------------------------------------------------------------
+$script:BootMenuSource = @'
+param(
+    [hashtable]$Result,
+    [object[]]$Items,
+    [string]$CurrentEngine,
+    [string]$CurrentChannel,
+    [int]$TimeoutSec,
+    [int]$Left,
+    [int]$Top,
+    [int]$Width,
+    [int]$Height
+)
+
+$form = $null
+$timer = $null
+try {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+
+    $scale = [Math]::Max(0.5, [Math]::Min(4.0, $Width / 1080.0))
+    function S([double]$value) { return [int][Math]::Round($value * $scale) }
+    function PX([double]$value) { return [single]($value * $scale) }
+
+    $family = 'Consolas'
+    try {
+        $families = @([System.Drawing.FontFamily]::Families | ForEach-Object { $_.Name })
+        foreach ($candidate in @('Microsoft YaHei UI', 'Microsoft YaHei', 'Consolas', 'Segoe UI')) {
+            if ($families -contains $candidate) { $family = $candidate; break }
+        }
+    } catch { }
+
+    $index = 0
+    for ($i = 0; $i -lt $Items.Count; $i++) {
+        if ($Items[$i].Kind -eq 'engine' -and $Items[$i].Id -eq $CurrentEngine) {
+            $index = $i
+            break
+        }
+    }
+
+    $state = @{
+        Index       = $index
+        KeyPressed  = $false
+        LastSecond  = -1
+        Watch       = [System.Diagnostics.Stopwatch]::StartNew()
+    }
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'MajdataPlay Boot Menu'
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+    $form.Bounds = New-Object System.Drawing.Rectangle($Left, $Top, $Width, $Height)
+    $form.BackColor = [System.Drawing.Color]::White
+    $form.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
+    $form.TopMost = $true
+    $form.ShowInTaskbar = $false
+    $form.KeyPreview = $true
+    $form.Cursor = [System.Windows.Forms.Cursors]::Default
+
+    # Form.DoubleBuffered is protected; set it through reflection to avoid
+    # flicker when the full-screen circle is repainted by the countdown.
+    try {
+        $prop = $form.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance,NonPublic')
+        if ($null -ne $prop) { $prop.SetValue($form, $true, $null) }
+    } catch { }
+
+    $titleFont = New-Object System.Drawing.Font($family, (PX 34), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $subtitleFont = New-Object System.Drawing.Font($family, (PX 16), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
+    $rowFont = New-Object System.Drawing.Font($family, (PX 18), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
+    $smallFont = New-Object System.Drawing.Font($family, (PX 11), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
+    $countFont = New-Object System.Drawing.Font($family, (PX 14), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+
+    $form.Add_Paint({
+        param($sender, $eventArgs)
+        $g = $eventArgs.Graphics
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+        try {
+            $w = [double]$form.ClientSize.Width
+            $h = [double]$form.ClientSize.Height
+            if ($w -le 0 -or $h -le 0) { return }
+
+            $bgRect = New-Object System.Drawing.Rectangle(0, 0, [int]$w, [int]$h)
+            $bgBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+                $bgRect,
+                [System.Drawing.Color]::White,
+                [System.Drawing.Color]::FromArgb(240, 249, 255),
+                [System.Drawing.Drawing2D.LinearGradientMode]::Vertical)
+            $g.FillRectangle($bgBrush, $bgRect)
+            $bgBrush.Dispose()
+
+            $cx = $w / 2.0
+            $diameter = $w
+            $r = $diameter / 2.0
+            $cy = $h - $r
+            if ($r -lt 10) { return }
+
+            $accent = [System.Drawing.Color]::FromArgb(14, 165, 233)
+            $circlePath = New-Object System.Drawing.Drawing2D.GraphicsPath
+            $circlePath.AddEllipse([single]($cx - $r), [single]($cy - $r), [single]($r * 2), [single]($r * 2))
+            $fill = New-Object System.Drawing.Drawing2D.PathGradientBrush($circlePath)
+            $fill.CenterColor = [System.Drawing.Color]::FromArgb(30, $accent.R, $accent.G, $accent.B)
+            $fill.SurroundColors = [System.Drawing.Color[]]@([System.Drawing.Color]::White)
+            $g.FillPath($fill, $circlePath)
+            $fill.Dispose()
+
+            $ringPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(225, 56, 189, 248), [single]([Math]::Max(2.0, 2.4 * $scale)))
+            $g.DrawEllipse($ringPen, [single]($cx - $r), [single]($cy - $r), [single]($r * 2), [single]($r * 2))
+            $ringPen.Dispose()
+            $innerR = $r - (S 10)
+            $innerPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(150, 125, 211, 252), [single]([Math]::Max(1.0, $scale)))
+            $g.DrawEllipse($innerPen, [single]($cx - $innerR), [single]($cy - $innerR), [single]($innerR * 2), [single]($innerR * 2))
+            $innerPen.Dispose()
+
+            $titleBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(2, 132, 199))
+            $textBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(3, 105, 161))
+            $mutedBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(2, 132, 199))
+            $selectedTextBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+
+            $title = 'MAJDATAPLAY BOOT MENU'
+            $titleSize = $g.MeasureString($title, $titleFont)
+            $g.DrawString($title, $titleFont, $titleBrush, [single]($cx - $titleSize.Width / 2.0), [single]($cy - $r * 0.61))
+
+            $subtitle = '选择启动项或更新通道'
+            $subSize = $g.MeasureString($subtitle, $subtitleFont)
+            $g.DrawString($subtitle, $subtitleFont, $mutedBrush, [single]($cx - $subSize.Width / 2.0), [single]($cy - $r * 0.48))
+
+            $rowHeight = [Math]::Max((S 26), $r * 0.105)
+            $listWidth = $r * 1.52
+            $listX = $cx - ($listWidth / 2.0)
+            $startY = $cy - $r * 0.37
+            $previousKind = $null
+
+            for ($i = 0; $i -lt $Items.Count; $i++) {
+                $item = $Items[$i]
+                if ($null -ne $previousKind -and $previousKind -eq 'engine' -and $item.Kind -eq 'channel') {
+                    $sepPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(170, 125, 211, 252), [single]1)
+                    $sepY = $startY + ($i * $rowHeight) - ($rowHeight * 0.16)
+                    $g.DrawLine($sepPen, [single]$listX, [single]$sepY, [single]($listX + $listWidth), [single]$sepY)
+                    $sepPen.Dispose()
+                }
+
+                $rowY = $startY + ($i * $rowHeight)
+                $isSelected = ($i -eq $state.Index)
+                if ($isSelected) {
+                    $selectedBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(14, 165, 233))
+                    $g.FillRectangle($selectedBrush, [single]$listX, [single]$rowY, [single]$listWidth, [single]($rowHeight * 0.86))
+                    $selectedBrush.Dispose()
+                }
+
+                $current = ''
+                if ($item.Kind -eq 'engine' -and $item.Id -eq $CurrentEngine) { $current = ' *' }
+                if ($item.Kind -eq 'channel' -and $item.Id -eq $CurrentChannel) { $current = ' *' }
+                $marker = if ($isSelected) { '>' } else { ' ' }
+                $text = '{0} {1}{2}' -f $marker, $item.Label, $current
+                $brush = if ($isSelected) { $selectedTextBrush } else { $textBrush }
+                $g.DrawString($text, $rowFont, $brush, [single]($listX + (S 14)), [single]($rowY + (S 4)))
+                $previousKind = $item.Kind
+            }
+
+            if ($state.KeyPressed) {
+                $countdown = 'Enter / C 确认'
+            } else {
+                $remaining = [Math]::Max(0, $TimeoutSec - $state.Watch.Elapsed.TotalSeconds)
+                $countdown = ('{0:N0} 秒后自动继续' -f [Math]::Ceiling($remaining))
+            }
+            $countSize = $g.MeasureString($countdown, $countFont)
+            $g.DrawString($countdown, $countFont, $titleBrush, [single]($cx - $countSize.Width / 2.0), [single]($cy + $r * 0.56))
+
+            $footer = '↑/↓ 选择   Enter/C 确认   Esc 跳过'
+            $footerSize = $g.MeasureString($footer, $smallFont)
+            $g.DrawString($footer, $smallFont, $mutedBrush, [single]($cx - $footerSize.Width / 2.0), [single]($cy + $r * 0.72))
+
+            $titleBrush.Dispose()
+            $textBrush.Dispose()
+            $mutedBrush.Dispose()
+            $selectedTextBrush.Dispose()
+            $circlePath.Dispose()
+        } catch {
+            $Result.Error = $_.Exception.ToString()
+            try { $form.Close() } catch { }
+        }
+    })
+
+    $form.Add_KeyDown({
+        param($sender, $eventArgs)
+        $state.KeyPressed = $true
+        $handled = $true
+        switch ($eventArgs.KeyCode) {
+            ([System.Windows.Forms.Keys]::Up) { $state.Index-- }
+            ([System.Windows.Forms.Keys]::W) { $state.Index-- }
+            ([System.Windows.Forms.Keys]::Q) { $state.Index-- }
+            ([System.Windows.Forms.Keys]::Down) { $state.Index++ }
+            ([System.Windows.Forms.Keys]::S) { $state.Index++ }
+            ([System.Windows.Forms.Keys]::Z) { $state.Index++ }
+            ([System.Windows.Forms.Keys]::X) { $state.Index++ }
+            ([System.Windows.Forms.Keys]::C) {
+                $item = $Items[$state.Index]
+                $Result.Kind = $item.Kind
+                $Result.Id = $item.Id
+                $Result.Action = 'Select'
+                $form.Close()
+            }
+            ([System.Windows.Forms.Keys]::Enter) {
+                $item = $Items[$state.Index]
+                $Result.Kind = $item.Kind
+                $Result.Id = $item.Id
+                $Result.Action = 'Select'
+                $form.Close()
+            }
+            ([System.Windows.Forms.Keys]::Escape) {
+                $Result.Action = 'Timeout'
+                $form.Close()
+            }
+            default { $handled = $false }
+        }
+        if ($state.Index -lt 0) { $state.Index = $Items.Count - 1 }
+        if ($state.Index -ge $Items.Count) { $state.Index = 0 }
+        if ($handled) { $eventArgs.SuppressKeyPress = $true }
+        $form.Invalidate()
+    })
+
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 100
+    $timer.Add_Tick({
+        if (-not $state.KeyPressed -and $state.Watch.Elapsed.TotalSeconds -ge $TimeoutSec) {
+            $timer.Stop()
+            $Result.Action = 'Timeout'
+            $form.Close()
+            return
+        }
+        if (-not $state.KeyPressed) {
+            $second = [int][Math]::Ceiling([Math]::Max(0, $TimeoutSec - $state.Watch.Elapsed.TotalSeconds))
+            if ($second -ne $state.LastSecond) {
+                $state.LastSecond = $second
+                $form.Invalidate()
+            }
+        }
+    })
+
+    $form.Add_FormClosing({
+        if ($Result.Action -eq '') { $Result.Action = 'Timeout' }
+        $Result.Closed = $true
+    })
+    $form.Add_Shown({
+        $form.Activate()
+        $Result.Handle = [int64]$form.Handle
+        $Result.Ready = $true
+        $timer.Start()
+    })
+
+    [System.Windows.Forms.Application]::Run($form)
+} catch {
+    $Result.Error = $_.Exception.ToString()
+} finally {
+    $Result.Closed = $true
+    if ($null -ne $timer) { try { $timer.Stop(); $timer.Dispose() } catch { } }
+    if ($null -ne $form) { try { $form.Dispose() } catch { } }
+}
+'@
+
+# ---------------------------------------------------------------------------
 # Logging and small utilities
 # ---------------------------------------------------------------------------
 function Initialize-Logger {
@@ -883,6 +1162,7 @@ function Save-InstallState {
     $state = [ordered]@{
         updaterVersion = $script:UpdaterVersion
         channel        = $Channel.ToLowerInvariant()
+        engine         = (Get-SavedEngine)
         tag            = $Release.Tag
         version        = $Release.Version
         commit         = $Release.Commit
@@ -949,14 +1229,11 @@ function ConvertTo-ChannelName {
     }
 }
 
-function Save-ChannelToState {
-    param([string]$SelectedChannel)
+function Save-StateFields {
+    param([hashtable]$Fields)
 
-    $normalized = ConvertTo-ChannelName $SelectedChannel
-    if ($null -eq $normalized) { throw ('无效的更新通道: {0}' -f $SelectedChannel) }
-
-    # Merge only the channel field into the existing state file so install
-    # metadata is never lost when the user changes the channel.
+    # Merge individual preference fields into the existing state file so install
+    # metadata is never lost.
     $state = Read-InstallState
     $data = [ordered]@{}
     if ($null -ne $state) {
@@ -964,8 +1241,57 @@ function Save-ChannelToState {
             $data[$property.Name] = $property.Value
         }
     }
-    $data['channel'] = $normalized.ToLowerInvariant()
+    foreach ($key in $Fields.Keys) {
+        $data[$key] = $Fields[$key]
+    }
     [System.IO.File]::WriteAllText((Get-StatePath), ($data | ConvertTo-Json -Depth 5), $script:Utf8NoBom)
+}
+
+function Save-ChannelToState {
+    param([string]$SelectedChannel)
+
+    $normalized = ConvertTo-ChannelName $SelectedChannel
+    if ($null -eq $normalized) { throw ('无效的更新通道: {0}' -f $SelectedChannel) }
+    Save-StateFields -Fields @{ channel = $normalized.ToLowerInvariant() }
+}
+
+function ConvertTo-EngineId {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $script:DefaultEngine }
+    $id = $Value.Trim().ToLowerInvariant()
+    if ($script:EngineOptions.Contains($id)) { return $id }
+    return $script:DefaultEngine
+}
+
+function Get-SavedEngine {
+    $state = Read-InstallState
+    if ($null -eq $state) { return $script:DefaultEngine }
+    return (ConvertTo-EngineId ([string]$state.engine))
+}
+
+function Get-EngineArguments {
+    param([string]$Engine)
+    $id = ConvertTo-EngineId $Engine
+    return [string]$script:EngineOptions[$id].Args
+}
+
+function Save-LaunchEngine {
+    param([string]$Engine)
+    $id = ConvertTo-EngineId $Engine
+    Save-StateFields -Fields @{ engine = $id }
+}
+
+function Get-BootMenuItems {
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($id in $script:EngineOptions.Keys) {
+        $option = $script:EngineOptions[$id]
+        $label = [string]$option.Label
+        if ($id -eq $script:DefaultEngine) { $label += '（默认）' }
+        $items.Add([pscustomobject]@{ Kind = 'engine'; Id = $id; Label = $label })
+    }
+    $items.Add([pscustomobject]@{ Kind = 'channel'; Id = 'Stable'; Label = '稳定版 Stable' })
+    $items.Add([pscustomobject]@{ Kind = 'channel'; Id = 'Nightly'; Label = 'Nightly' })
+    return $items.ToArray()
 }
 
 function Test-CommitEqual {
@@ -1317,7 +1643,7 @@ function Start-UpdaterRestart {
 
         if ($null -ne $BoundParameters) {
             foreach ($key in @($BoundParameters.Keys)) {
-                if ($key -eq 'SkipSelfUpdate') { continue }
+                if ($key -eq 'SkipSelfUpdate' -or $key -eq 'SkipBootMenu') { continue }
                 $value = $BoundParameters[$key]
                 if ($null -eq $value) { continue }
                 if ($value -is [System.Management.Automation.SwitchParameter]) {
@@ -1335,6 +1661,7 @@ function Start-UpdaterRestart {
             }
         }
         $arguments.Add('-SkipSelfUpdate')
+        $arguments.Add('-SkipBootMenu')
 
         $argumentLine = $arguments -join ' '
         Write-Log '更新器已更新，正在重启以应用新版本。'
@@ -2303,22 +2630,29 @@ function Stop-UpdaterGui {
     }
 
     try {
-        if (-not $Force) {
-            $script:UiState.CloseRequested = $true
-            Wait-WithTimeout -Condition { $script:UiState.GuiClosed } -TimeoutMs 2500 | Out-Null
-        }
+        $script:UiState.CloseRequested = $true
+        Wait-WithTimeout -Condition { $script:UiState.GuiClosed } -TimeoutMs 2500 | Out-Null
     } catch { }
 
     try {
-        if ($null -ne $script:GuiPowerShell) {
-            if ($script:GuiPowerShell.InvocationStateInfo.State -eq [System.Management.Automation.PSInvocationState]::Running) {
-                $script:GuiPowerShell.Stop()
-            }
-            $script:GuiPowerShell.Dispose()
+        $settled = $false
+        if ($null -eq $script:GuiPowerShell) {
+            $settled = $true
+        } else {
+            $settled = Wait-WithTimeout -Condition {
+                $script:GuiPowerShell.InvocationStateInfo.State -ne [System.Management.Automation.PSInvocationState]::Running
+            } -TimeoutMs 2000
         }
-    } catch { }
-    try {
-        if ($null -ne $script:GuiRunspace) { $script:GuiRunspace.Dispose() }
+        if ($settled) {
+            if ($null -ne $script:GuiPowerShell) { $script:GuiPowerShell.Dispose() }
+            if ($null -ne $script:GuiRunspace) { $script:GuiRunspace.Dispose() }
+        } elseif (-not $script:UiState.GuiClosed) {
+            # Only abort when the window never closed. Aborting a visible paint
+            # callback produces a fatal WinForms PipelineStoppedException.
+            $script:GuiPowerShell.Stop()
+            $script:GuiPowerShell.Dispose()
+            if ($null -ne $script:GuiRunspace) { $script:GuiRunspace.Dispose() }
+        }
     } catch { }
 
     $script:GuiPowerShell = $null
@@ -2486,14 +2820,246 @@ public class MajdataUpdaterNative {
         $result.Error = $_.Exception.Message
     } finally {
         try {
-            if ($null -ne $ps -and $ps.InvocationStateInfo.State -eq [System.Management.Automation.PSInvocationState]::Running) {
-                $ps.Stop()
+            $settled = $false
+            if ($null -eq $ps) {
+                $settled = $true
+            } else {
+                $settled = Wait-WithTimeout -Condition {
+                    $ps.InvocationStateInfo.State -ne [System.Management.Automation.PSInvocationState]::Running
+                } -TimeoutMs 1500
             }
-            if ($null -ne $ps) { $ps.Dispose() }
-            if ($null -ne $runspace) { $runspace.Dispose() }
+            if ($settled) {
+                if ($null -ne $ps) { $ps.Dispose() }
+                if ($null -ne $runspace) { $runspace.Dispose() }
+            } elseif (-not $state.Closed) {
+                $ps.Stop()
+                $ps.Dispose()
+                $runspace.Dispose()
+            }
         } catch { }
     }
     return $result
+}
+
+function Read-BootMenuConsole {
+    param(
+        [object[]]$Items,
+        [string]$CurrentEngine,
+        [string]$CurrentChannel,
+        [int]$TimeoutSec
+    )
+
+    $result = [pscustomobject]@{ Action = 'Timeout'; Kind = ''; Id = ''; Error = '' }
+    try {
+        $null = [Console]::KeyAvailable
+    } catch {
+        return $result
+    }
+
+    $index = 0
+    for ($i = 0; $i -lt $Items.Count; $i++) {
+        if ($Items[$i].Kind -eq 'engine' -and $Items[$i].Id -eq $CurrentEngine) {
+            $index = $i
+            break
+        }
+    }
+
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    $countdown = $true
+    $lastSecond = -1
+
+    $render = {
+        Clear-Host
+        Write-Host ''
+        Write-Host '  MAJDATAPLAY BOOT MENU' -ForegroundColor Cyan
+        Write-Host '  选择启动项，或切换更新通道' -ForegroundColor DarkGray
+        Write-Host ''
+        $previousKind = $null
+        for ($i = 0; $i -lt $Items.Count; $i++) {
+            $item = $Items[$i]
+            if ($null -ne $previousKind -and $previousKind -eq 'engine' -and $item.Kind -eq 'channel') {
+                Write-Host ('  ' + ('-' * 58)) -ForegroundColor DarkCyan
+            }
+            $current = ''
+            if ($item.Kind -eq 'engine' -and $item.Id -eq $CurrentEngine) { $current = ' *' }
+            if ($item.Kind -eq 'channel' -and $item.Id -eq $CurrentChannel) { $current = ' *' }
+            $marker = if ($i -eq $index) { '>' } else { ' ' }
+            $line = '  {0} {1}{2}' -f $marker, $item.Label, $current
+            if ($i -eq $index) {
+                Write-Host $line -ForegroundColor Black -BackgroundColor Cyan
+            } else {
+                Write-Host $line -ForegroundColor Gray
+            }
+            $previousKind = $item.Kind
+        }
+        Write-Host ''
+        if ($countdown) {
+            $remaining = [Math]::Max(0, $TimeoutSec - $watch.Elapsed.TotalSeconds)
+            Write-Host ('  {0:N0} 秒后自动继续' -f [Math]::Ceiling($remaining)) -ForegroundColor Yellow
+        } else {
+            Write-Host '  Enter / C 确认' -ForegroundColor Yellow
+        }
+        Write-Host '  ↑/↓ 选择   Enter/C 确认   Esc 跳过' -ForegroundColor DarkGray
+    }
+
+    while ($true) {
+        $redraw = $false
+        if ($countdown) {
+            $remaining = $TimeoutSec - $watch.Elapsed.TotalSeconds
+            if ($remaining -le 0) {
+                try { Clear-Host } catch { }
+                return $result
+            }
+            $second = [int][Math]::Ceiling($remaining)
+            if ($second -ne $lastSecond) {
+                $lastSecond = $second
+                $redraw = $true
+            }
+        }
+
+        try {
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                $countdown = $false
+                switch ($key.Key) {
+                    ([ConsoleKey]::UpArrow) { $index-- }
+                    ([ConsoleKey]::W) { $index-- }
+                    ([ConsoleKey]::Q) { $index-- }
+                    ([ConsoleKey]::DownArrow) { $index++ }
+                    ([ConsoleKey]::S) { $index++ }
+                    ([ConsoleKey]::Z) { $index++ }
+                    ([ConsoleKey]::X) { $index++ }
+                    ([ConsoleKey]::Enter) {
+                        $item = $Items[$index]
+                        $result.Kind = $item.Kind
+                        $result.Id = $item.Id
+                        $result.Action = 'Select'
+                        try { Clear-Host } catch { }
+                        return $result
+                    }
+                    ([ConsoleKey]::C) {
+                        $item = $Items[$index]
+                        $result.Kind = $item.Kind
+                        $result.Id = $item.Id
+                        $result.Action = 'Select'
+                        try { Clear-Host } catch { }
+                        return $result
+                    }
+                    ([ConsoleKey]::Escape) {
+                        try { Clear-Host } catch { }
+                        return $result
+                    }
+                }
+                if ($index -lt 0) { $index = $Items.Count - 1 }
+                if ($index -ge $Items.Count) { $index = 0 }
+                $redraw = $true
+            }
+        } catch {
+            return $result
+        }
+
+        if ($redraw) {
+            try { & $render } catch { return $result }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+}
+
+function Show-BootMenu {
+    param(
+        [object]$TargetScreen,
+        [object[]]$Items,
+        [string]$CurrentEngine,
+        [string]$CurrentChannel,
+        [int]$TimeoutSec = 5
+    )
+
+    $result = [pscustomobject]@{
+        Action  = 'Timeout'
+        Kind    = ''
+        Id      = ''
+        Error   = ''
+    }
+
+    if ($NoGui -or $null -eq $TargetScreen) {
+        return (Read-BootMenuConsole -Items $Items -CurrentEngine $CurrentEngine -CurrentChannel $CurrentChannel -TimeoutSec $TimeoutSec)
+    }
+
+    $ps = $null
+    $runspace = $null
+    try {
+        $bounds = $TargetScreen.Bounds
+        $state = [hashtable]::Synchronized(@{
+            Ready   = $false
+            Closed  = $false
+            Action  = 'Timeout'
+            Kind    = ''
+            Id      = ''
+            Error   = ''
+            Handle  = [int64]0
+        })
+
+        $runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+        $runspace.ApartmentState = [System.Threading.ApartmentState]::STA
+        $runspace.ThreadOptions = [System.Management.Automation.Runspaces.PSThreadOptions]::ReuseThread
+        $runspace.Open()
+
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        $ps.Runspace = $runspace
+        [void]$ps.AddScript($script:BootMenuSource)
+        [void]$ps.AddArgument($state)
+        [void]$ps.AddArgument($Items)
+        [void]$ps.AddArgument($CurrentEngine)
+        [void]$ps.AddArgument($CurrentChannel)
+        [void]$ps.AddArgument([int]$TimeoutSec)
+        [void]$ps.AddArgument([int]$bounds.Left)
+        [void]$ps.AddArgument([int]$bounds.Top)
+        [void]$ps.AddArgument([int]$bounds.Width)
+        [void]$ps.AddArgument([int]$bounds.Height)
+        [void]$ps.BeginInvoke()
+
+        $ready = Wait-WithTimeout -Condition {
+            $state.Ready -or $state.Closed -or -not [string]::IsNullOrWhiteSpace([string]$state.Error)
+        } -TimeoutMs 8000
+        if (-not $ready -or (-not $state.Ready -and -not $state.Closed)) {
+            throw ('启动菜单窗口启动失败: ' + [string]$state.Error)
+        }
+
+        while (-not $state.Closed -and [string]::IsNullOrWhiteSpace([string]$state.Error)) {
+            Start-Sleep -Milliseconds 100
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace([string]$state.Error)) {
+            throw [string]$state.Error
+        }
+
+        $result.Action = [string]$state.Action
+        $result.Kind = [string]$state.Kind
+        $result.Id = [string]$state.Id
+        return $result
+    } catch {
+        Write-Log ('启动菜单 GUI 不可用，回退到控制台: ' + $_.Exception.Message) WARN
+        return (Read-BootMenuConsole -Items $Items -CurrentEngine $CurrentEngine -CurrentChannel $CurrentChannel -TimeoutSec $TimeoutSec)
+    } finally {
+        try {
+            # Never abort the runspace while a WinForms Paint callback may still
+            # be executing. PipelineStoppedException inside OnPaint is fatal.
+            $settled = $false
+            if ($null -eq $ps) {
+                $settled = $true
+            } else {
+                $settled = Wait-WithTimeout -Condition {
+                    $ps.InvocationStateInfo.State -ne [System.Management.Automation.PSInvocationState]::Running
+                } -TimeoutMs 3000
+            }
+            if ($settled) {
+                if ($null -ne $ps) { $ps.Dispose() }
+                if ($null -ne $runspace) { $runspace.Dispose() }
+            } else {
+                Write-Log '启动菜单 runspace 未在 3 秒内结束，留给进程退出时回收。' WARN
+            }
+        } catch { }
+    }
 }
 
 function Read-ChannelFromConsole {
@@ -2648,6 +3214,14 @@ public class MajdataUpdaterWindowNative {
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetFocus(IntPtr hWnd);
 }
 '@
         }
@@ -2664,12 +3238,24 @@ public class MajdataUpdaterWindowNative {
         $flags = 0x0001 -bor 0x0002 -bor 0x0040 # NOSIZE | NOMOVE | SHOWWINDOW
         [void][MajdataUpdaterWindowNative]::SetWindowPos($handle, [IntPtr](-1), 0, 0, 0, 0, $flags)
         [void][MajdataUpdaterWindowNative]::SetWindowPos($handle, [IntPtr](-2), 0, 0, 0, 0, $flags)
-        [void][MajdataUpdaterWindowNative]::SetForegroundWindow($handle)
 
+        $foreground = [MajdataUpdaterWindowNative]::GetForegroundWindow()
+        [uint32]$processId = 0
+        $targetThread = [MajdataUpdaterWindowNative]::GetWindowThreadProcessId($handle, [ref]$processId)
+        $foregroundThread = [MajdataUpdaterWindowNative]::GetWindowThreadProcessId($foreground, [ref]$processId)
+        $currentThread = [MajdataUpdaterWindowNative]::GetCurrentThreadId()
+        $attached = $false
+        if ($currentThread -ne $targetThread) {
+            $attached = [MajdataUpdaterWindowNative]::AttachThreadInput($currentThread, $targetThread, $true)
+        }
         try {
-            Add-Type -AssemblyName Microsoft.VisualBasic
-            [Microsoft.VisualBasic.Interaction]::AppActivate($Process.Id) | Out-Null
-        } catch { }
+            [void][MajdataUpdaterWindowNative]::SetForegroundWindow($handle)
+            [void][MajdataUpdaterWindowNative]::SetFocus($handle)
+        } finally {
+            if ($attached) {
+                [void][MajdataUpdaterWindowNative]::AttachThreadInput($currentThread, $targetThread, $false)
+            }
+        }
 
         Start-Sleep -Milliseconds 300
         $foreground = [MajdataUpdaterWindowNative]::GetForegroundWindow()
@@ -2693,8 +3279,16 @@ function Start-Game {
     if (Test-GameRunning) {
         Write-Log 'MajdataPlay 已在运行，核验窗口并置于前台。'
     } else {
-        Write-Log "启动游戏: $exe"
-        $started = Start-Process -FilePath $exe -WorkingDirectory $script:InstallPath -PassThru
+        Write-Log ("启动游戏: {0} {1}" -f $exe, $script:GameLaunchArgs)
+        $startArgs = @{
+            FilePath         = $exe
+            WorkingDirectory = $script:InstallPath
+            PassThru         = $true
+        }
+        if (-not [string]::IsNullOrWhiteSpace($script:GameLaunchArgs)) {
+            $startArgs.ArgumentList = $script:GameLaunchArgs
+        }
+        $started = Start-Process @startArgs
         if ($null -eq $started) { throw '无法创建 MajdataPlay 进程。' }
     }
 
@@ -2795,6 +3389,53 @@ try {
     Write-Log ('下载/解压目录: {0}' -f $downloadDir)
 
     $channelWasExplicit = $PSBoundParameters.ContainsKey('Channel')
+    $menuState = Read-InstallState
+    $menuChannel = 'Stable'
+    if ($channelWasExplicit) {
+        $menuChannel = ConvertTo-ChannelName $Channel
+    } elseif ($null -ne $menuState) {
+        $menuChannel = ConvertTo-ChannelName ([string]$menuState.channel)
+    }
+    if ($null -eq $menuChannel) { $menuChannel = 'Stable' }
+
+    $savedEngine = Get-SavedEngine
+    $script:GameLaunchArgs = Get-EngineArguments $savedEngine
+    if (-not $CheckOnly -and -not $SkipBootMenu) {
+        try {
+            if ($null -eq $menuState -or [string]::IsNullOrWhiteSpace([string]$menuState.engine)) {
+                Save-LaunchEngine -Engine $savedEngine
+            }
+            $menuItems = Get-BootMenuItems
+            $menuScreen = $null
+            if (-not $NoGui) {
+                $menuScreen = Get-EligibleScreen -Index $MonitorIndex
+            }
+            Write-Log '显示启动菜单（5 秒无操作则使用默认项继续）。'
+            $menuResult = Show-BootMenu -TargetScreen $menuScreen -Items $menuItems -CurrentEngine $savedEngine -CurrentChannel $menuChannel -TimeoutSec 5
+            if ($menuResult.Action -eq 'Select') {
+                if ($menuResult.Kind -eq 'engine') {
+                    $savedEngine = ConvertTo-EngineId $menuResult.Id
+                    Save-LaunchEngine -Engine $savedEngine
+                    $script:GameLaunchArgs = Get-EngineArguments $savedEngine
+                    Write-Log ('启动菜单选择引擎: {0} ({1})' -f $savedEngine, $script:GameLaunchArgs)
+                } elseif ($menuResult.Kind -eq 'channel') {
+                    $selectedChannel = ConvertTo-ChannelName $menuResult.Id
+                    if ($null -ne $selectedChannel) {
+                        Save-ChannelToState -SelectedChannel $selectedChannel
+                        $Channel = $selectedChannel
+                        Write-Log ('启动菜单选择更新通道: {0}' -f $selectedChannel)
+                    }
+                }
+            } else {
+                Write-Log ('启动菜单超时，继续使用引擎 {0} ({1})。' -f $savedEngine, $script:GameLaunchArgs)
+            }
+        } catch {
+            Write-Log ('启动菜单失败，继续默认流程: ' + $_.Exception.Message) WARN
+        }
+    } else {
+        Write-Log ('跳过启动菜单，使用引擎 {0} ({1})。' -f $savedEngine, $script:GameLaunchArgs)
+    }
+
     $Channel = Resolve-InitialChannel -RequestedChannel $Channel -Explicit $channelWasExplicit
     $script:UiState.Channel = $Channel
     Write-Log ('本次更新通道: {0}' -f $Channel)
