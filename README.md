@@ -6,7 +6,7 @@
 - 默认只覆盖游戏程序文件，**保留 `MajdataPlay_Data\StreamingAssets` 中已存在的文件**；新文件仍会补齐。加 `-OverwriteStreamingAssets` 才会覆盖。
 - 默认在竖屏 16:9 显示器上绘制全屏 GUI（白色背景、天蓝色文字）：圆直径等于屏幕宽度（1080×1920 上为 1080 px，4K 及其他 9:16 分辨率按比例缩放），所有输出都放在圆内；不满足条件时自动回退到命令行。
 - 更新完成后自动启动 `MajdataPlay.exe`，核验游戏窗口已出现并置于前台后再退出。
-- **首次运行**（安装目录中没有游戏文件）会弹出小窗口，让用户选择 `Stable` 或 `Nightly`，并把 `channel` 字段写入 `.majdataplay-updater.json`；后续直接使用保存的通道。
+- **首次运行**（安装目录中没有游戏文件）启动菜单不倒计时，可直接选择 `Stable`、`Nightly` 和启动引擎，并把 `channel` 字段写入 `.majdataplay-updater.json`；后续直接使用保存的通道。
 - 游戏默认安装到 `<脚本目录>\MajdataPlay\`；下载的 ZIP 也放在该目录，**解压完成后立即删除 ZIP**，避免占用空间；不使用 `%LOCALAPPDATA%` 或其它外部缓存目录。
 - **更新器自更新**：从 `TeamMajdata/Majplay-update-cli` 的 `main` 分支检查脚本新版本，校验后替换自身并用原参数重启。
 
@@ -77,9 +77,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 
 ## 启动菜单
 
-每次正常启动更新器（未指定 `-CheckOnly` / `-SkipBootMenu`）时，会先显示 BIOS 风格的启动菜单，倒计时 **5 秒**：
+每次正常启动更新器（未指定 `-CheckOnly` / `-SkipBootMenu`）时，会先显示启动菜单：
 
-- 无键盘操作 → 使用上次保存的引擎继续更新和启动，默认 `D3D12`。
+- **首次运行**（安装目录中还没有游戏文件）不显示倒计时，必须选择一个启动项。
+- 之后每次启动倒计时 **5 秒**，无键盘操作则使用上次保存的引擎继续，默认 `D3D12`。
 - 键盘操作后倒计时停止，等待确认。
 
 可用按键：
@@ -107,9 +108,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 
 竖屏 16:9 显示器上，启动菜单绘制在与主 GUI 相同的底部内接圆内；`-NoGui` 或没有合适显示器时使用控制台菜单。
 
-## 首次运行与通道设置
+## 通道设置
 
-当安装目录中还没有 `MajdataPlay.exe` / `MajdataPlay_Data` 时，脚本会弹出一个小窗口。如果检测到竖屏 16:9 显示器，窗口会按分辨率缩放，并放在屏幕下半部分、与主 GUI 圆相同的圆心位置；否则居中显示在主显示器上。
+首次运行直接在启动菜单中选择通道，不再显示单独的通道弹窗。没有选择时默认使用稳定版 Stable。
 
 - **稳定版 Stable**：正式发布版，经过测试，更新节奏较慢，更适合日常游玩。
 - **Nightly 预览版**：滚动构建，更新更快，包含最新功能和修复，但可能不稳定，适合尝鲜。
@@ -136,7 +137,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-MajdataPlay.ps1
 .\Update-MajdataPlay.ps1 -Channel Stable
 ```
 
-使用 `-NoGui` 时不会显示小窗口，而是在控制台询问；非交互环境请直接传 `-Channel`，避免等待输入。
+使用 `-NoGui` 时启动菜单显示在控制台；非交互环境请直接传 `-Channel`，否则默认使用 Stable。
 
 ## 更新判定
 
@@ -213,7 +214,7 @@ MajdataPlay_Data\StreamingAssets\
 - 版本号来自脚本顶部的标记：
 
   ```powershell
-  # MAJDATA_UPDATER_VERSION: 1.2.0
+  # MAJDATA_UPDATER_VERSION: 1.2.1
   ```
 
 - 只有远程版本**高于**当前版本时才会替换。
@@ -257,7 +258,7 @@ MajdataPlay_Data\StreamingAssets\
 
 | 参数 | 说明 |
 | --- | --- |
-| `-Channel Stable\|Nightly` | 更新通道；省略时使用已保存的设置，首次运行弹窗选择 |
+| `-Channel Stable\|Nightly` | 更新通道；省略时使用已保存的设置，首次运行默认 Stable |
 | `-InstallPath <path>` | 游戏目录；默认 `<脚本目录>\MajdataPlay` |
 | `-Proxy <url>` | 指定代理，如 `http://127.0.0.1:7890` |
 | `-NoProxy` | 禁用所有代理 |
@@ -268,7 +269,7 @@ MajdataPlay_Data\StreamingAssets\
 | `-Force` | 强制下载并重新安装 |
 | `-CheckOnly` | 只检查并报告 |
 | `-NoLaunch` | 更新后不启动游戏 |
-| `-SkipBootMenu` | 跳过 5 秒启动菜单（自更新重启时会自动使用） |
+| `-SkipBootMenu` | 跳过启动菜单（自更新重启时会自动使用） |
 | `-NoGui` | 强制命令行 |
 | `-MonitorIndex <int>` | 指定 GUI 显示器索引，`-1` 为自动 |
 | `-StopRunningGame` | 安装前关闭正在运行的游戏 |

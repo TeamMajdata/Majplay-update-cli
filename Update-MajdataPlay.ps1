@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# MAJDATA_UPDATER_VERSION: 1.2.0
+# MAJDATA_UPDATER_VERSION: 1.2.1
 <#
 .SYNOPSIS
     MajdataPlay one-click updater for Windows.
@@ -24,9 +24,8 @@
 
     GUI:
       * By default the updater looks for a portrait 16:9 display (9:16).
-      * On such a display it draws a full-screen GUI with a 1080 px diameter
-        circle in the lower half (capped by the display width) and puts all
-        output inside that circle.
+      * On such a display it draws a full-screen GUI with a circle spanning the
+        display width, bottom-aligned, and puts all output inside that circle.
       * Otherwise it falls back to the command line.
       * Use -NoGui to force the command line.
 
@@ -34,7 +33,7 @@
     Stable selects the newest non-prerelease release.
     Nightly selects the rolling "nightly" release.
     When omitted, the saved setting is used. On a first run without game files,
-    a small window asks the user to choose and saves the answer.
+    choose the channel in the boot menu; if skipped, Stable is used.
 
 .PARAMETER InstallPath
     Game directory containing MajdataPlay.exe. Defaults to
@@ -90,7 +89,7 @@
     when the updater restarts after a successful self-update.
 
 .PARAMETER SkipBootMenu
-    Skip the 5-second boot menu. This switch is also passed internally when the
+    Skip the boot menu. This switch is also passed internally when the
     updater restarts after a successful self-update.
 
 .PARAMETER LogPath
@@ -154,7 +153,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$script:UpdaterVersion = '1.2.0'
+$script:UpdaterVersion = '1.2.1'
 $script:UpdaterRepository = 'TeamMajdata/Majplay-update-cli'
 $script:DefaultSelfUpdateUrl = 'https://github.com/TeamMajdata/Majplay-update-cli/raw/refs/heads/main/Update-MajdataPlay.ps1'
 $script:Repository = 'TeamMajdata/MajdataPlay'
@@ -264,7 +263,6 @@ try {
     }
 
     $fonts = @{
-        Eyebrow = New-UiFont (16 * $scale) ([System.Drawing.FontStyle]::Bold)
         Heading = New-UiFont (44 * $scale) ([System.Drawing.FontStyle]::Bold)
         Body    = New-UiFont (21 * $scale) ([System.Drawing.FontStyle]::Regular)
         Small   = New-UiFont (16 * $scale) ([System.Drawing.FontStyle]::Regular)
@@ -295,29 +293,7 @@ try {
         $h = [double]$form.ClientSize.Height
         if ($w -le 0 -or $h -le 0) { return }
 
-        $bgRect = New-Object System.Drawing.Rectangle(0, 0, [int]$w, [int]$h)
-        $bgTop = [System.Drawing.Color]::White
-        $bgBottom = [System.Drawing.Color]::FromArgb(240, 249, 255)
-        $bgBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($bgRect, $bgTop, $bgBottom, [System.Drawing.Drawing2D.LinearGradientMode]::Vertical)
-        $g.FillRectangle($bgBrush, $bgRect)
-        $bgBrush.Dispose()
-
-        # Very subtle vertical guides / top-half watermark; all real output stays
-        # inside the circle in the lower half.
-        $gridPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(180, 224, 242, 254), [single]1)
-        $step = [Math]::Max(48.0, $w / 12.0)
-        for ($x = $step; $x -lt $w; $x += $step) {
-            $g.DrawLine($gridPen, [single]$x, [single]0, [single]$x, [single]($h / 2.0))
-        }
-        $gridPen.Dispose()
-
-        $watermarkFont = New-UiFont (46 * $scale) ([System.Drawing.FontStyle]::Bold)
-        $watermarkBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(150, 186, 230, 253))
-        $watermark = 'MAJDATAPLAY'
-        $wmSize = $g.MeasureString($watermark, $watermarkFont)
-        $g.DrawString($watermark, $watermarkFont, $watermarkBrush, [single](($w - $wmSize.Width) / 2), [single]($h * 0.19))
-        $watermarkFont.Dispose()
-        $watermarkBrush.Dispose()
+        $g.Clear([System.Drawing.Color]::White)
 
         $cx = $w / 2.0
         # The circle spans the full display width: 1080 px at 1080x1920,
@@ -334,38 +310,9 @@ try {
         if ($isFailed) { $accent = $script:paintState.Failed }
         elseif ($isSuccess) { $accent = $script:paintState.Success }
 
-        # Circle fill: soft radial glow.
-        $circlePath = New-Object System.Drawing.Drawing2D.GraphicsPath
-        $circlePath.AddEllipse([single]($cx - $r), [single]($cy - $r), [single]($r * 2), [single]($r * 2))
-        $fill = New-Object System.Drawing.Drawing2D.PathGradientBrush($circlePath)
-        $fill.CenterColor = [System.Drawing.Color]::FromArgb(34, $accent.R, $accent.G, $accent.B)
-        $fill.SurroundColors = [System.Drawing.Color[]]@([System.Drawing.Color]::White)
-        $g.FillPath($fill, $circlePath)
-        $fill.Dispose()
-
-        # Outer glow rings.
-        for ($i = 3; $i -ge 1; $i--) {
-            $alpha = 10 + (4 - $i) * 10
-            $glowPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb($alpha, $accent.R, $accent.G, $accent.B), [single](2.0 * $i * $scale))
-            $g.DrawEllipse($glowPen, [single]($cx - $r), [single]($cy - $r), [single]($r * 2), [single]($r * 2))
-            $glowPen.Dispose()
-        }
-
         $ringPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(210, $accent.R, $accent.G, $accent.B), [single]([Math]::Max(2.0, 2.4 * $scale)))
         $g.DrawEllipse($ringPen, [single]($cx - $r), [single]($cy - $r), [single]($r * 2), [single]($r * 2))
         $ringPen.Dispose()
-
-        $innerR = $r - (10 * $scale)
-        $innerPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(150, 125, 211, 252), [single]([Math]::Max(1.0, 1.0 * $scale)))
-        $g.DrawEllipse($innerPen, [single]($cx - $innerR), [single]($cy - $innerR), [single]($innerR * 2), [single]($innerR * 2))
-        $innerPen.Dispose()
-
-        # Decorative arcs on the main ring.
-        $arcRect = New-Object System.Drawing.RectangleF([single]($cx - $r), [single]($cy - $r), [single]($r * 2), [single]($r * 2))
-        $arcPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(230, 2, 132, 199), [single]([Math]::Max(1.0, 1.2 * $scale)))
-        $g.DrawArc($arcPen, $arcRect, 202, 54)
-        $g.DrawArc($arcPen, $arcRect, 22, 54)
-        $arcPen.Dispose()
 
         function Draw-CenteredText {
             param(
@@ -433,9 +380,7 @@ try {
         $dimBrush = New-Object System.Drawing.SolidBrush($script:paintState.Dim)
         $accentBrush = New-Object System.Drawing.SolidBrush($accent)
 
-        $g.DrawString('MAJDATAPLAY UPDATER', $fonts.Eyebrow, $accentBrush, [single]($cx - $g.MeasureString('MAJDATAPLAY UPDATER', $fonts.Eyebrow).Width / 2.0), [single]($cy - $r * 0.63))
-
-        $headingHeight = Draw-CenteredText -Text $phase -Font $fonts.Heading -Brush $textBrush -CenterY ($cy - $r * 0.44) -MaxWidth ($r * 1.45) -MaxLines 2
+        $headingHeight = Draw-CenteredText -Text $phase -Font $fonts.Heading -Brush $textBrush -CenterY ($cy - $r * 0.50) -MaxWidth ($r * 1.45) -MaxLines 2
         $bodyCenter = $cy - $r * 0.10 + $headingHeight * 0.15
         $bodyHeight = Draw-CenteredText -Text $message -Font $fonts.Body -Brush $textBrush -CenterY $bodyCenter -MaxWidth ($r * 1.46) -MaxLines 5
 
@@ -454,7 +399,7 @@ try {
             if ($ratio -gt 0) {
                 $fillWidth = [Math]::Max($barHeight, $barWidth * $ratio)
                 $fillRect = New-Object System.Drawing.RectangleF([single]$barX, [single]$barY, [single]$fillWidth, [single]$barHeight)
-                $barBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($fillRect, $accent, [System.Drawing.Color]::FromArgb(125, 211, 252), [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
+                $barBrush = New-Object System.Drawing.SolidBrush($accent)
                 $g.FillRectangle($barBrush, $fillRect)
                 $barBrush.Dispose()
             }
@@ -489,7 +434,6 @@ try {
         $mutedBrush.Dispose()
         $dimBrush.Dispose()
         $accentBrush.Dispose()
-        $circlePath.Dispose()
 
         } catch {
             $State.GuiError = $_.Exception.ToString()
@@ -558,160 +502,6 @@ try {
     if ($null -ne $timer) {
         try { $timer.Stop(); $timer.Dispose() } catch { }
     }
-    if ($null -ne $form) {
-        try { $form.Dispose() } catch { }
-    }
-}
-'@
-
-# ---------------------------------------------------------------------------
-# First-run channel picker (small window)
-# ---------------------------------------------------------------------------
-$script:ChannelPromptSource = @'
-param(
-    [hashtable]$Result,
-    [int]$Left,
-    [int]$Top,
-    [int]$Width,
-    [int]$Height,
-    [double]$Scale = 1.0
-)
-
-$form = $null
-$ErrorActionPreference = 'Stop'
-try {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    [System.Windows.Forms.Application]::EnableVisualStyles()
-
-    $uiScale = [Math]::Max(0.5, [Math]::Min(4.0, [double]$Scale))
-    function S([double]$value) { return [int][Math]::Round($value * $uiScale) }
-    function PX([double]$value) { return [single]($value * $uiScale) }
-
-    $family = 'Segoe UI'
-    try {
-        $families = @([System.Drawing.FontFamily]::Families | ForEach-Object { $_.Name })
-        foreach ($candidate in @('Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI')) {
-            if ($families -contains $candidate) { $family = $candidate; break }
-        }
-    } catch { }
-
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'MajdataPlay Updater - 首次运行'
-    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
-    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-    $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
-    $form.ClientSize = New-Object System.Drawing.Size($Width, $Height)
-    $form.Location = New-Object System.Drawing.Point($Left, $Top)
-    $form.BackColor = [System.Drawing.Color]::White
-    $form.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
-    $form.MaximizeBox = $false
-    $form.MinimizeBox = $false
-    $form.TopMost = $true
-    $form.ShowInTaskbar = $true
-    $form.KeyPreview = $true
-
-    $title = New-Object System.Windows.Forms.Label
-    $title.Text = '首次运行'
-    $title.Font = New-Object System.Drawing.Font($family, (PX 30), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $title.ForeColor = [System.Drawing.Color]::FromArgb(2, 132, 199)
-    $title.AutoSize = $true
-    $title.Location = New-Object System.Drawing.Point((S 30), (S 24))
-    $form.Controls.Add($title)
-
-    $subtitle = New-Object System.Windows.Forms.Label
-    $subtitle.Text = 'Stable 更稳定，Nightly 更新更快。请选择：'
-    $subtitle.Font = New-Object System.Drawing.Font($family, (PX 13), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
-    $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
-    $subtitle.AutoSize = $false
-    $subtitle.Size = New-Object System.Drawing.Size(($Width - (S 60)), (S 24))
-    $subtitle.Location = New-Object System.Drawing.Point((S 30), (S 70))
-    $form.Controls.Add($subtitle)
-
-    $stable = New-Object System.Windows.Forms.Button
-    $stable.Text = "稳定版`nStable"
-    $stable.Font = New-Object System.Drawing.Font($family, (PX 16), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $stable.Size = New-Object System.Drawing.Size((S 225), (S 64))
-    $stable.Location = New-Object System.Drawing.Point((S 30), (S 110))
-    $stable.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $stable.FlatAppearance.BorderSize = 0
-    $stable.BackColor = [System.Drawing.Color]::FromArgb(2, 132, 199)
-    $stable.ForeColor = [System.Drawing.Color]::White
-    $stable.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $stable.Add_Click({
-        $Result.Channel = 'Stable'
-        $Result.Selected = $true
-        $form.Close()
-    })
-    $form.Controls.Add($stable)
-
-    $stableDesc = New-Object System.Windows.Forms.Label
-    $stableDesc.Text = "正式发布版，经过测试`n更新节奏较慢`n更适合日常游玩"
-    $stableDesc.Font = New-Object System.Drawing.Font($family, (PX 12.5), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
-    $stableDesc.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
-    $stableDesc.AutoSize = $false
-    $stableDesc.Size = New-Object System.Drawing.Size((S 225), (S 76))
-    $stableDesc.Location = New-Object System.Drawing.Point((S 30), (S 182))
-    $form.Controls.Add($stableDesc)
-
-    $nightly = New-Object System.Windows.Forms.Button
-    $nightly.Text = "Nightly`n预览版"
-    $nightly.Font = New-Object System.Drawing.Font($family, (PX 16), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $nightly.Size = New-Object System.Drawing.Size((S 225), (S 64))
-    $nightly.Location = New-Object System.Drawing.Point((S 275), (S 110))
-    $nightly.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $nightly.FlatAppearance.BorderSize = 0
-    $nightly.BackColor = [System.Drawing.Color]::FromArgb(14, 165, 233)
-    $nightly.ForeColor = [System.Drawing.Color]::White
-    $nightly.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $nightly.Add_Click({
-        $Result.Channel = 'Nightly'
-        $Result.Selected = $true
-        $form.Close()
-    })
-    $form.Controls.Add($nightly)
-
-    $nightlyDesc = New-Object System.Windows.Forms.Label
-    $nightlyDesc.Text = "滚动构建，更新更快`n包含最新功能和修复`n可能不稳定，适合尝鲜"
-    $nightlyDesc.Font = New-Object System.Drawing.Font($family, (PX 12.5), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
-    $nightlyDesc.ForeColor = [System.Drawing.Color]::FromArgb(3, 105, 161)
-    $nightlyDesc.AutoSize = $false
-    $nightlyDesc.Size = New-Object System.Drawing.Size((S 225), (S 76))
-    $nightlyDesc.Location = New-Object System.Drawing.Point((S 275), (S 182))
-    $form.Controls.Add($nightlyDesc)
-
-    $hint = New-Object System.Windows.Forms.Label
-    $hint.Text = '不确定时，建议选择稳定版。'
-    $hint.Font = New-Object System.Drawing.Font($family, (PX 11.5), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
-    $hint.ForeColor = [System.Drawing.Color]::FromArgb(56, 189, 248)
-    $hint.AutoSize = $false
-    $hint.Size = New-Object System.Drawing.Size(($Width - (S 60)), (S 22))
-    $hint.Location = New-Object System.Drawing.Point((S 30), (S 284))
-    $form.Controls.Add($hint)
-
-    $form.AcceptButton = $stable
-    $form.Add_KeyDown({
-        param($sender, $eventArgs)
-        if ($eventArgs.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
-            $Result.Cancelled = $true
-            $form.Close()
-        }
-    })
-    $form.Add_FormClosing({
-        if (-not $Result.Selected) { $Result.Cancelled = $true }
-        $Result.Closed = $true
-    })
-    $form.Add_Shown({
-        $form.Activate()
-        $Result.Handle = [int64]$form.Handle
-        $Result.Ready = $true
-    })
-
-    [System.Windows.Forms.Application]::Run($form)
-} catch {
-    $Result.Error = $_.Exception.ToString()
-} finally {
-    $Result.Closed = $true
     if ($null -ne $form) {
         try { $form.Dispose() } catch { }
     }
@@ -788,7 +578,6 @@ try {
     } catch { }
 
     $titleFont = New-Object System.Drawing.Font($family, (PX 34), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $subtitleFont = New-Object System.Drawing.Font($family, (PX 16), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
     $rowFont = New-Object System.Drawing.Font($family, (PX 18), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
     $smallFont = New-Object System.Drawing.Font($family, (PX 11), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
     $countFont = New-Object System.Drawing.Font($family, (PX 14), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
@@ -803,14 +592,7 @@ try {
             $h = [double]$form.ClientSize.Height
             if ($w -le 0 -or $h -le 0) { return }
 
-            $bgRect = New-Object System.Drawing.Rectangle(0, 0, [int]$w, [int]$h)
-            $bgBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-                $bgRect,
-                [System.Drawing.Color]::White,
-                [System.Drawing.Color]::FromArgb(240, 249, 255),
-                [System.Drawing.Drawing2D.LinearGradientMode]::Vertical)
-            $g.FillRectangle($bgBrush, $bgRect)
-            $bgBrush.Dispose()
+            $g.Clear([System.Drawing.Color]::White)
 
             $cx = $w / 2.0
             $diameter = $w
@@ -818,40 +600,23 @@ try {
             $cy = $h - $r
             if ($r -lt 10) { return }
 
-            $accent = [System.Drawing.Color]::FromArgb(14, 165, 233)
-            $circlePath = New-Object System.Drawing.Drawing2D.GraphicsPath
-            $circlePath.AddEllipse([single]($cx - $r), [single]($cy - $r), [single]($r * 2), [single]($r * 2))
-            $fill = New-Object System.Drawing.Drawing2D.PathGradientBrush($circlePath)
-            $fill.CenterColor = [System.Drawing.Color]::FromArgb(30, $accent.R, $accent.G, $accent.B)
-            $fill.SurroundColors = [System.Drawing.Color[]]@([System.Drawing.Color]::White)
-            $g.FillPath($fill, $circlePath)
-            $fill.Dispose()
-
             $ringPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(225, 56, 189, 248), [single]([Math]::Max(2.0, 2.4 * $scale)))
             $g.DrawEllipse($ringPen, [single]($cx - $r), [single]($cy - $r), [single]($r * 2), [single]($r * 2))
             $ringPen.Dispose()
-            $innerR = $r - (S 10)
-            $innerPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(150, 125, 211, 252), [single]([Math]::Max(1.0, $scale)))
-            $g.DrawEllipse($innerPen, [single]($cx - $innerR), [single]($cy - $innerR), [single]($innerR * 2), [single]($innerR * 2))
-            $innerPen.Dispose()
 
             $titleBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(2, 132, 199))
             $textBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(3, 105, 161))
             $mutedBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(2, 132, 199))
             $selectedTextBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
 
-            $title = 'MAJDATAPLAY BOOT MENU'
+            $title = 'BOOT MENU'
             $titleSize = $g.MeasureString($title, $titleFont)
-            $g.DrawString($title, $titleFont, $titleBrush, [single]($cx - $titleSize.Width / 2.0), [single]($cy - $r * 0.61))
-
-            $subtitle = '选择启动项或更新通道'
-            $subSize = $g.MeasureString($subtitle, $subtitleFont)
-            $g.DrawString($subtitle, $subtitleFont, $mutedBrush, [single]($cx - $subSize.Width / 2.0), [single]($cy - $r * 0.48))
+            $g.DrawString($title, $titleFont, $titleBrush, [single]($cx - $titleSize.Width / 2.0), [single]($cy - $r * 0.58))
 
             $rowHeight = [Math]::Max((S 26), $r * 0.105)
             $listWidth = $r * 1.52
             $listX = $cx - ($listWidth / 2.0)
-            $startY = $cy - $r * 0.37
+            $startY = $cy - $r * 0.42
             $previousKind = $null
 
             for ($i = 0; $i -lt $Items.Count; $i++) {
@@ -881,7 +646,9 @@ try {
                 $previousKind = $item.Kind
             }
 
-            if ($state.KeyPressed) {
+            if ($TimeoutSec -le 0) {
+                $countdown = '请选择启动项'
+            } elseif ($state.KeyPressed) {
                 $countdown = 'Enter / C 确认'
             } else {
                 $remaining = [Math]::Max(0, $TimeoutSec - $state.Watch.Elapsed.TotalSeconds)
@@ -898,7 +665,6 @@ try {
             $textBrush.Dispose()
             $mutedBrush.Dispose()
             $selectedTextBrush.Dispose()
-            $circlePath.Dispose()
         } catch {
             $Result.Error = $_.Exception.ToString()
             try { $form.Close() } catch { }
@@ -946,6 +712,7 @@ try {
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 100
     $timer.Add_Tick({
+        if ($TimeoutSec -le 0) { return }
         if (-not $state.KeyPressed -and $state.Watch.Elapsed.TotalSeconds -ge $TimeoutSec) {
             $timer.Stop()
             $Result.Action = 'Timeout'
@@ -969,7 +736,7 @@ try {
         $form.Activate()
         $Result.Handle = [int64]$form.Handle
         $Result.Ready = $true
-        $timer.Start()
+        if ($TimeoutSec -gt 0) { $timer.Start() }
     })
 
     [System.Windows.Forms.Application]::Run($form)
@@ -2713,134 +2480,6 @@ function Wait-GuiErrorDismiss {
     $script:UseGui = $false
 }
 
-function Show-ChannelPromptGui {
-    param([object]$TargetScreen)
-
-    $result = [pscustomobject]@{
-        Success   = $false
-        Channel   = ''
-        Cancelled = $false
-        Error     = ''
-    }
-    $ps = $null
-    $runspace = $null
-    try {
-        Add-Type -AssemblyName System.Windows.Forms
-
-        if ($null -ne $TargetScreen) {
-            $area = $TargetScreen.Bounds
-            # Match the main GUI circle: full display width, bottom-aligned.
-            $promptScale = $area.Width / 1080.0
-            $diameter = $area.Width
-            $centerX = $area.Left + ($area.Width / 2.0)
-            $centerY = $area.Top + $area.Height - ($diameter / 2.0)
-        } else {
-            $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-            $promptScale = [Math]::Min($area.Width / 1920.0, $area.Height / 1080.0)
-        }
-        $promptScale = [Math]::Max(0.6, [Math]::Min(4.0, $promptScale))
-        $width = [int][Math]::Round(540 * $promptScale)
-        $height = [int][Math]::Round(340 * $promptScale)
-
-        if ($null -ne $TargetScreen) {
-            $left = [int][Math]::Round($centerX - ($width / 2.0))
-            $top = [int][Math]::Round($centerY - ($height / 2.0))
-            $left = [Math]::Max($area.Left + 8, [Math]::Min($left, $area.Right - $width - 8))
-            $top = [Math]::Max($area.Top + 8, [Math]::Min($top, $area.Bottom - $height - 8))
-        } else {
-            $left = $area.Left + [int](($area.Width - $width) / 2)
-            $top = $area.Top + [int](($area.Height - $height) / 2)
-        }
-
-        $state = [hashtable]::Synchronized(@{
-            Ready     = $false
-            Selected  = $false
-            Cancelled = $false
-            Closed    = $false
-            Channel   = ''
-            Error     = ''
-            Handle    = [int64]0
-        })
-
-        $runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
-        $runspace.ApartmentState = [System.Threading.ApartmentState]::STA
-        $runspace.ThreadOptions = [System.Management.Automation.Runspaces.PSThreadOptions]::ReuseThread
-        $runspace.Open()
-
-        $ps = [System.Management.Automation.PowerShell]::Create()
-        $ps.Runspace = $runspace
-        [void]$ps.AddScript($script:ChannelPromptSource)
-        [void]$ps.AddArgument($state)
-        [void]$ps.AddArgument([int]$left)
-        [void]$ps.AddArgument([int]$top)
-        [void]$ps.AddArgument([int]$width)
-        [void]$ps.AddArgument([int]$height)
-        [void]$ps.AddArgument([double]$promptScale)
-        [void]$ps.BeginInvoke()
-
-        $ready = Wait-WithTimeout -Condition {
-            $state.Ready -or $state.Closed -or -not [string]::IsNullOrWhiteSpace([string]$state.Error)
-        } -TimeoutMs 5000
-        if (-not $ready) { throw '首次运行窗口启动超时。' }
-
-        if (-not $state.Selected -and -not $state.Closed -and [int64]$state.Handle -ne 0) {
-            Start-Sleep -Milliseconds 300
-            try {
-                Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class MajdataUpdaterNative {
-    [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr hWnd);
-}
-'@
-                if (-not [MajdataUpdaterNative]::IsWindowVisible([IntPtr]$state.Handle)) {
-                    throw '首次运行窗口不可见。'
-                }
-            } catch {
-                if ($_.Exception.Message -eq '首次运行窗口不可见。') { throw }
-                # If the visibility probe itself is unavailable, keep going.
-            }
-        }
-
-        while (-not $state.Selected -and -not $state.Closed -and [string]::IsNullOrWhiteSpace([string]$state.Error)) {
-            Start-Sleep -Milliseconds 100
-        }
-
-        if ($state.Selected) {
-            $result.Success = $true
-            $result.Channel = [string]$state.Channel
-        } elseif ($state.Cancelled) {
-            $result.Cancelled = $true
-        } else {
-            $result.Error = [string]$state.Error
-            if ([string]::IsNullOrWhiteSpace($result.Error)) { $result.Error = '首次运行窗口意外关闭。' }
-        }
-    } catch {
-        $result.Error = $_.Exception.Message
-    } finally {
-        try {
-            $settled = $false
-            if ($null -eq $ps) {
-                $settled = $true
-            } else {
-                $settled = Wait-WithTimeout -Condition {
-                    $ps.InvocationStateInfo.State -ne [System.Management.Automation.PSInvocationState]::Running
-                } -TimeoutMs 1500
-            }
-            if ($settled) {
-                if ($null -ne $ps) { $ps.Dispose() }
-                if ($null -ne $runspace) { $runspace.Dispose() }
-            } elseif (-not $state.Closed) {
-                $ps.Stop()
-                $ps.Dispose()
-                $runspace.Dispose()
-            }
-        } catch { }
-    }
-    return $result
-}
-
 function Read-BootMenuConsole {
     param(
         [object[]]$Items,
@@ -2851,6 +2490,7 @@ function Read-BootMenuConsole {
 
     $result = [pscustomobject]@{ Action = 'Timeout'; Kind = ''; Id = ''; Error = '' }
     try {
+        if ([Console]::IsInputRedirected) { return $result }
         $null = [Console]::KeyAvailable
     } catch {
         return $result
@@ -2865,13 +2505,14 @@ function Read-BootMenuConsole {
     }
 
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
-    $countdown = $true
+    $countdown = ($TimeoutSec -gt 0)
     $lastSecond = -1
+    $firstRender = $true
 
     $render = {
         Clear-Host
         Write-Host ''
-        Write-Host '  MAJDATAPLAY BOOT MENU' -ForegroundColor Cyan
+        Write-Host '  BOOT MENU' -ForegroundColor Cyan
         Write-Host '  选择启动项，或切换更新通道' -ForegroundColor DarkGray
         Write-Host ''
         $previousKind = $null
@@ -2893,7 +2534,9 @@ function Read-BootMenuConsole {
             $previousKind = $item.Kind
         }
         Write-Host ''
-        if ($countdown) {
+        if ($TimeoutSec -le 0) {
+            Write-Host '  请选择启动项' -ForegroundColor Yellow
+        } elseif ($countdown) {
             $remaining = [Math]::Max(0, $TimeoutSec - $watch.Elapsed.TotalSeconds)
             Write-Host ('  {0:N0} 秒后自动继续' -f [Math]::Ceiling($remaining)) -ForegroundColor Yellow
         } else {
@@ -2903,7 +2546,8 @@ function Read-BootMenuConsole {
     }
 
     while ($true) {
-        $redraw = $false
+        $redraw = $firstRender
+        $firstRender = $false
         if ($countdown) {
             $remaining = $TimeoutSec - $watch.Elapsed.TotalSeconds
             if ($remaining -le 0) {
@@ -3060,85 +2704,6 @@ function Show-BootMenu {
             }
         } catch { }
     }
-}
-
-function Read-ChannelFromConsole {
-    Write-Host ''
-    Write-Host '  首次运行：请选择更新通道' -ForegroundColor Cyan
-    Write-Host '    1. 稳定版 Stable' -ForegroundColor DarkGray
-    Write-Host '    2. Nightly 预览版' -ForegroundColor DarkGray
-    while ($true) {
-        try {
-            $answer = Read-Host '输入 1 或 2（直接回车取消）'
-        } catch {
-            return $null
-        }
-        if ([string]::IsNullOrWhiteSpace($answer)) { return $null }
-        switch ($answer.Trim().ToLowerInvariant()) {
-            '1' { return 'Stable' }
-            's' { return 'Stable' }
-            'stable' { return 'Stable' }
-            '2' { return 'Nightly' }
-            'n' { return 'Nightly' }
-            'nightly' { return 'Nightly' }
-            'q' { return $null }
-            default { Write-Host '请输入 1 或 2。' -ForegroundColor Yellow }
-        }
-    }
-}
-
-function Resolve-InitialChannel {
-    param(
-        [string]$RequestedChannel,
-        [bool]$Explicit
-    )
-
-    if ($Explicit) {
-        $requested = ConvertTo-ChannelName $RequestedChannel
-        if ($null -eq $requested) { throw ('无效的更新通道: {0}' -f $RequestedChannel) }
-        Save-ChannelToState -SelectedChannel $requested
-        Write-Log ('更新通道由命令行指定并写入状态文件: {0}' -f $requested)
-        return $requested
-    }
-
-    $state = Read-InstallState
-    if ($null -ne $state) {
-        $saved = ConvertTo-ChannelName ([string]$state.channel)
-        if ($null -ne $saved) {
-            Write-Log ('使用状态文件中的更新通道: {0}' -f $saved)
-            return $saved
-        }
-    }
-
-    if (-not (Test-CoreFilesPresent)) {
-        Write-Log '未检测到游戏文件，首次运行需要选择更新通道。'
-        $choice = $null
-        if (-not $NoGui) {
-            $promptScreen = Get-EligibleScreen -Index $MonitorIndex
-            $guiResult = Show-ChannelPromptGui -TargetScreen $promptScreen
-            if ($guiResult.Success) {
-                $choice = $guiResult.Channel
-            } elseif ($guiResult.Cancelled) {
-                throw (New-Object System.OperationCanceledException('已取消更新通道选择。'))
-            } else {
-                Write-Log ('首次运行窗口不可用: ' + $guiResult.Error) WARN
-            }
-        }
-
-        if ([string]::IsNullOrWhiteSpace($choice)) {
-            $choice = Read-ChannelFromConsole
-        }
-        if ([string]::IsNullOrWhiteSpace($choice)) {
-            throw '未选择更新通道。请使用 -Channel Stable 或 -Channel Nightly 指定。'
-        }
-
-        $choice = ConvertTo-ChannelName $choice
-        Save-ChannelToState -SelectedChannel $choice
-        Write-Log ('首次运行选择的更新通道: {0}' -f $choice)
-        return $choice
-    }
-
-    return 'Stable'
 }
 
 function Test-GameRunning {
@@ -3400,6 +2965,7 @@ try {
 
     $savedEngine = Get-SavedEngine
     $script:GameLaunchArgs = Get-EngineArguments $savedEngine
+    $isFirstRun = -not (Test-CoreFilesPresent)
     if (-not $CheckOnly -and -not $SkipBootMenu) {
         try {
             if ($null -eq $menuState -or [string]::IsNullOrWhiteSpace([string]$menuState.engine)) {
@@ -3410,8 +2976,13 @@ try {
             if (-not $NoGui) {
                 $menuScreen = Get-EligibleScreen -Index $MonitorIndex
             }
-            Write-Log '显示启动菜单（5 秒无操作则使用默认项继续）。'
-            $menuResult = Show-BootMenu -TargetScreen $menuScreen -Items $menuItems -CurrentEngine $savedEngine -CurrentChannel $menuChannel -TimeoutSec 5
+            $menuTimeout = if ($isFirstRun) { 0 } else { 5 }
+            if ($isFirstRun) {
+                Write-Log '显示启动菜单（首次启动，不自动倒计时）。'
+            } else {
+                Write-Log '显示启动菜单（5 秒无操作则使用默认项继续）。'
+            }
+            $menuResult = Show-BootMenu -TargetScreen $menuScreen -Items $menuItems -CurrentEngine $savedEngine -CurrentChannel $menuChannel -TimeoutSec $menuTimeout
             if ($menuResult.Action -eq 'Select') {
                 if ($menuResult.Kind -eq 'engine') {
                     $savedEngine = ConvertTo-EngineId $menuResult.Id
@@ -3436,7 +3007,24 @@ try {
         Write-Log ('跳过启动菜单，使用引擎 {0} ({1})。' -f $savedEngine, $script:GameLaunchArgs)
     }
 
-    $Channel = Resolve-InitialChannel -RequestedChannel $Channel -Explicit $channelWasExplicit
+    if ($channelWasExplicit) {
+        $normalizedChannel = ConvertTo-ChannelName $Channel
+        if ($null -eq $normalizedChannel) { $normalizedChannel = 'Stable' }
+        $Channel = $normalizedChannel
+        Save-ChannelToState -SelectedChannel $Channel
+    } else {
+        $stateAfterMenu = Read-InstallState
+        $savedChannel = $null
+        if ($null -ne $stateAfterMenu) {
+            $savedChannel = ConvertTo-ChannelName ([string]$stateAfterMenu.channel)
+        }
+        if ($null -ne $savedChannel) {
+            $Channel = $savedChannel
+        } else {
+            $Channel = 'Stable'
+            Save-ChannelToState -SelectedChannel $Channel
+        }
+    }
     $script:UiState.Channel = $Channel
     Write-Log ('本次更新通道: {0}' -f $Channel)
 
